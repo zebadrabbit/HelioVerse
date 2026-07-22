@@ -9,6 +9,7 @@
  *         for this package so multiple consumers can coexist on the same page.
  */
 
+import { GripVertical } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 export type NotificationEvent = {
@@ -746,13 +747,53 @@ export function DashboardLayout({
   const chatOpacity = chatHovered ? 1 : elapsed <= chatVisibleHold ? 1 : clamp(1 - (elapsed - chatVisibleHold) / CHAT_FADE_OUT_MS, 0, 1);
   const chatDormant = !chatHovered && elapsed >= chatFadeMs;
 
-  // leftPanel/rightPanel/configTab/backgroundAtmosphere/draggingTarget/beginDrag/chatOpacity/chatDormant
-  // are retained from the original component for behavioral parity even though the current
-  // render only mounts mainPanel (matches upstream Heliospheric behavior).
+  // configTab/backgroundAtmosphere/chatOpacity/chatDormant are retained from the
+  // original component for behavioral parity (audio config + comms feed rendering
+  // aren't wired up in this generic package yet -- HelioVerse consumers don't pass
+  // audio/chat content, only leftPanel/rightPanel/mainPanel).
+
+  const renderWindow = (
+    target: DragTarget,
+    title: string,
+    position: Position,
+    width: number,
+    minimized: boolean,
+    setMinimized: (value: boolean) => void,
+    content: ReactNode,
+  ) => (
+    <div
+      className="absolute z-[25] flex flex-col rounded-xl border border-slate-700/70 bg-slate-900/85 shadow-2xl backdrop-blur-md"
+      style={{ left: position.x, top: position.y, width }}
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-2">
+        <button
+          type="button"
+          onPointerDown={(event) => beginDrag(event, target, position)}
+          className="flex flex-1 cursor-grab items-center gap-2 text-left text-xs uppercase tracking-[0.18em] text-slate-300 active:cursor-grabbing"
+        >
+          <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
+          {title}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMinimized(!minimized)}
+          className="rounded px-1.5 py-0.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
+          aria-label={minimized ? "Expand" : "Minimize"}
+        >
+          {minimized ? "▢" : "—"}
+        </button>
+      </div>
+      {!minimized && <div className="max-h-[calc(100vh-88px)] overflow-y-auto p-4">{content}</div>}
+    </div>
+  );
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#010208]">
-      <div className="absolute inset-0 z-10">{mainPanel}</div>
+      <div className="absolute inset-0 z-10">
+        {mainPanel}
+        {renderWindow("left", "Mission Control", leftPos, 384, leftMinimized, setLeftMinimized, leftPanel)}
+        {renderWindow("right", "Atlas", rightPos, 416, rightMinimized, setRightMinimized, rightPanel)}
+      </div>
     </div>
   );
 }
