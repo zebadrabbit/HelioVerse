@@ -47,14 +47,17 @@ with the view angle).
 
 ## Controls
 
-- Click: select/focus a body
-- Left-click-hold drag: rotate camera around the current focus
+- Click: select a body and re-center the view on it (no zoom change)
+- Double-click: fly all the way in to a body (or enter/exit a system, for a star)
+- Left-click-hold drag: rotate camera around the current focus (both axes
+  inverted from raw mouse delta, and vertical range spans roughly ±87°)
 - Right-click-hold drag: pan (translate the view without rotating)
 - Right-click (no drag): open the pull-out action menu for the body under the cursor
 - Wheel: zoom
-- Double-click: enter/exit a system
 - Hold Tab: open a flat hierarchical tree of every body (`NodeTreeOverview`);
   ↑/↓ or hover to browse, release Tab / Enter / click to fly the camera there
+- Icon rail (left edge): toggle Mission Control / Atlas independently, or
+  open Settings
 
 ## Usage
 
@@ -76,6 +79,16 @@ small window event bridge (`helioverse:focus-target`, `helioverse:canvas-reset`,
 `helioverse:radial-action`, `helioverse:breadcrumb`) so a fly-to link
 clicked in a host panel, or a pick made in the overview, can move the camera
 without remounting the canvas.
+
+`DashboardLayout`'s Settings panel (orbit trail opacity, background color,
+render distance, audio, pretty mode) talks to `UniverseCanvas` the same way,
+over `SETTINGS_EVENT`/`SETTINGS_STORAGE_KEY` (exported, along with the
+`CanvasSettings` type and `DEFAULT_CANVAS_SETTINGS`).
+
+A body's "Open" action fires `OPEN_EVENT` with `{ bodyId, tier }` in its
+detail — this package doesn't know what "open" means for any given domain,
+so a host app listens for it to do something useful (HelioWriter opens an
+edit form, for instance).
 
 ## Develop
 

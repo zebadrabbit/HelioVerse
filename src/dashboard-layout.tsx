@@ -9,8 +9,9 @@
  *         for this package so multiple consumers can coexist on the same page.
  */
 
-import { GripVertical } from "lucide-react";
+import { Compass, GripVertical, Rocket, Settings, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { DEFAULT_CANVAS_SETTINGS, SETTINGS_EVENT, SETTINGS_STORAGE_KEY, type CanvasSettings } from "./universe-canvas";
 
 export type NotificationEvent = {
   id: string;
@@ -136,33 +137,84 @@ export function DashboardLayout({
   const storedConfig = getStoredConfig();
   const storedLayout = getStoredLayout();
 
-  const [leftVisible, setLeftVisible] = useState(false);
-  const [rightVisible, setRightVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [canvasSettings, setCanvasSettings] = useState<CanvasSettings>(DEFAULT_CANVAS_SETTINGS);
+
+  const [leftVisible, setLeftVisible] = useState(true);
+  const [rightVisible, setRightVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(false);
   const [audioVisible, setAudioVisible] = useState(false);
 
-  const [leftMinimized, setLeftMinimized] = useState(() => typeof storedLayout.leftMinimized === "boolean" ? storedLayout.leftMinimized : false);
-  const [rightMinimized, setRightMinimized] = useState(() => typeof storedLayout.rightMinimized === "boolean" ? storedLayout.rightMinimized : false);
-  const [chatMinimized, setChatMinimized] = useState(() => typeof storedLayout.chatMinimized === "boolean" ? storedLayout.chatMinimized : false);
-  const [audioMinimized, setAudioMinimized] = useState(() => typeof storedLayout.audioMinimized === "boolean" ? storedLayout.audioMinimized : true);
+  const [leftMinimized, setLeftMinimized] = useState(false);
+  const [rightMinimized, setRightMinimized] = useState(false);
+  const [chatMinimized, setChatMinimized] = useState(false);
+  const [audioMinimized, setAudioMinimized] = useState(true);
 
-  const [leftPos, setLeftPos] = useState<Position>(() => validPosition(storedLayout.leftPos) ? storedLayout.leftPos : { x: 74, y: 20 });
-  const [rightPos, setRightPos] = useState<Position>(() => validPosition(storedLayout.rightPos) ? storedLayout.rightPos : { x: 0, y: 20 });
-  const [chatPos, setChatPos] = useState<Position>(() => validPosition(storedLayout.chatPos) ? storedLayout.chatPos : { x: 0, y: 0 });
-  const [audioPos, setAudioPos] = useState<Position>(() => validPosition(storedLayout.audioPos) ? storedLayout.audioPos : { x: 0, y: 0 });
+  const [leftPos, setLeftPos] = useState<Position>({ x: 74, y: 20 });
+  const [rightPos, setRightPos] = useState<Position>({ x: 0, y: 20 });
+  const [chatPos, setChatPos] = useState<Position>({ x: 0, y: 0 });
+  const [audioPos, setAudioPos] = useState<Position>({ x: 0, y: 0 });
 
-  const [muted, setMuted] = useState(() => typeof storedConfig.muted === "boolean" ? storedConfig.muted : DEFAULT_CONFIG.muted);
-  const [masterVolume, setMasterVolume] = useState(() => typeof storedConfig.masterVolume === "number" ? clamp(storedConfig.masterVolume, 0, 100) : DEFAULT_CONFIG.masterVolume);
-  const [uiVolume, setUiVolume] = useState(() => typeof storedConfig.uiVolume === "number" ? clamp(storedConfig.uiVolume, 0, 100) : DEFAULT_CONFIG.uiVolume);
-  const [cueIntensity, setCueIntensity] = useState(() => typeof storedConfig.cueIntensity === "number" ? clamp(storedConfig.cueIntensity, 0, 140) : DEFAULT_CONFIG.cueIntensity);
-  const [chatFadeMs, setChatFadeMs] = useState(() => typeof storedConfig.chatFadeMs === "number" ? clamp(storedConfig.chatFadeMs, 6000, 60000) : DEFAULT_CONFIG.chatFadeMs);
-  const [typewriterIntervalMs, setTypewriterIntervalMs] = useState(() => typeof storedConfig.typewriterIntervalMs === "number" ? clamp(storedConfig.typewriterIntervalMs, 8, 64) : DEFAULT_CONFIG.typewriterIntervalMs);
-  const [maxChatMessages, setMaxChatMessages] = useState(() => typeof storedConfig.maxChatMessages === "number" ? clamp(Math.round(storedConfig.maxChatMessages), 4, 24) : DEFAULT_CONFIG.maxChatMessages);
-  const [autoOpenComms, setAutoOpenComms] = useState(() => typeof storedConfig.autoOpenComms === "boolean" ? storedConfig.autoOpenComms : DEFAULT_CONFIG.autoOpenComms);
-  const [inertiaScale, setInertiaScale] = useState(() => typeof storedConfig.inertiaScale === "number" ? clamp(storedConfig.inertiaScale, 0.5, 1.8) : DEFAULT_CONFIG.inertiaScale);
-  const [snapRadius, setSnapRadius] = useState(() => typeof storedConfig.snapRadius === "number" ? clamp(storedConfig.snapRadius, 12, 64) : DEFAULT_CONFIG.snapRadius);
+  const [muted, setMuted] = useState(DEFAULT_CONFIG.muted);
+  const [masterVolume, setMasterVolume] = useState(DEFAULT_CONFIG.masterVolume);
+  const [uiVolume, setUiVolume] = useState(DEFAULT_CONFIG.uiVolume);
+  const [cueIntensity, setCueIntensity] = useState(DEFAULT_CONFIG.cueIntensity);
+  const [chatFadeMs, setChatFadeMs] = useState(DEFAULT_CONFIG.chatFadeMs);
+  const [typewriterIntervalMs, setTypewriterIntervalMs] = useState(DEFAULT_CONFIG.typewriterIntervalMs);
+  const [maxChatMessages, setMaxChatMessages] = useState(DEFAULT_CONFIG.maxChatMessages);
+  const [autoOpenComms, setAutoOpenComms] = useState(DEFAULT_CONFIG.autoOpenComms);
+  const [inertiaScale, setInertiaScale] = useState(DEFAULT_CONFIG.inertiaScale);
+  const [snapRadius, setSnapRadius] = useState(DEFAULT_CONFIG.snapRadius);
   const [showHotkeyHints, setShowHotkeyHints] = useState(false);
-  const [backgroundAtmosphere, setBackgroundAtmosphere] = useState(() => typeof storedConfig.backgroundAtmosphere === "number" ? clamp(storedConfig.backgroundAtmosphere, 40, 150) : DEFAULT_CONFIG.backgroundAtmosphere);
+  const [backgroundAtmosphere, setBackgroundAtmosphere] = useState(DEFAULT_CONFIG.backgroundAtmosphere);
+
+  // ponytail: storedConfig/storedLayout come from localStorage, which isn't
+  // available during SSR -- applying them in useState initializers made the
+  // client's first render diverge from the server's and broke hydration.
+  // Apply them once, after mount, instead.
+  useEffect(() => {
+    if (typeof storedLayout.leftVisible === "boolean") setLeftVisible(storedLayout.leftVisible);
+    if (typeof storedLayout.rightVisible === "boolean") setRightVisible(storedLayout.rightVisible);
+    if (typeof storedLayout.leftMinimized === "boolean") setLeftMinimized(storedLayout.leftMinimized);
+    if (typeof storedLayout.rightMinimized === "boolean") setRightMinimized(storedLayout.rightMinimized);
+    if (typeof storedLayout.chatMinimized === "boolean") setChatMinimized(storedLayout.chatMinimized);
+    if (typeof storedLayout.audioMinimized === "boolean") setAudioMinimized(storedLayout.audioMinimized);
+    if (validPosition(storedLayout.leftPos)) setLeftPos(storedLayout.leftPos);
+    if (validPosition(storedLayout.rightPos)) setRightPos(storedLayout.rightPos);
+    if (validPosition(storedLayout.chatPos)) setChatPos(storedLayout.chatPos);
+    if (validPosition(storedLayout.audioPos)) setAudioPos(storedLayout.audioPos);
+
+    if (typeof storedConfig.muted === "boolean") setMuted(storedConfig.muted);
+    if (typeof storedConfig.masterVolume === "number") setMasterVolume(clamp(storedConfig.masterVolume, 0, 100));
+    if (typeof storedConfig.uiVolume === "number") setUiVolume(clamp(storedConfig.uiVolume, 0, 100));
+    if (typeof storedConfig.cueIntensity === "number") setCueIntensity(clamp(storedConfig.cueIntensity, 0, 140));
+    if (typeof storedConfig.chatFadeMs === "number") setChatFadeMs(clamp(storedConfig.chatFadeMs, 6000, 60000));
+    if (typeof storedConfig.typewriterIntervalMs === "number") setTypewriterIntervalMs(clamp(storedConfig.typewriterIntervalMs, 8, 64));
+    if (typeof storedConfig.maxChatMessages === "number") setMaxChatMessages(clamp(Math.round(storedConfig.maxChatMessages), 4, 24));
+    if (typeof storedConfig.autoOpenComms === "boolean") setAutoOpenComms(storedConfig.autoOpenComms);
+    if (typeof storedConfig.inertiaScale === "number") setInertiaScale(clamp(storedConfig.inertiaScale, 0.5, 1.8));
+    if (typeof storedConfig.snapRadius === "number") setSnapRadius(clamp(storedConfig.snapRadius, 12, 64));
+    if (typeof storedConfig.backgroundAtmosphere === "number") setBackgroundAtmosphere(clamp(storedConfig.backgroundAtmosphere, 40, 150));
+
+    try {
+      const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (raw) {
+        setCanvasSettings({ ...DEFAULT_CANVAS_SETTINGS, ...(JSON.parse(raw) as Partial<CanvasSettings>) });
+      }
+    } catch {
+      // ignore malformed storage
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const updateCanvasSetting = useCallback((patch: Partial<CanvasSettings>) => {
+    setCanvasSettings((current) => {
+      const next = { ...current, ...patch };
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent<Partial<CanvasSettings>>(SETTINGS_EVENT, { detail: patch }));
+      return next;
+    });
+  }, []);
   const [configTab, setConfigTab] = useState<ConfigTab>("audio");
 
   const [chatHovered, setChatHovered] = useState(false);
@@ -645,6 +697,18 @@ export function DashboardLayout({
     setAudioMinimized(false);
   }
 
+  const toggleLeftPanel = useCallback(() => {
+    setLeftVisible((value) => !value);
+    setLeftMinimized(false);
+    playCue("toggle", 0.7);
+  }, [playCue]);
+
+  const toggleRightPanel = useCallback(() => {
+    setRightVisible((value) => !value);
+    setRightMinimized(false);
+    playCue("toggle", 0.7);
+  }, [playCue]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -658,14 +722,12 @@ export function DashboardLayout({
 
       if (event.key === "[") {
         event.preventDefault();
-        playCue("toggle", 0.75);
-        openExclusivePanel("left");
+        toggleLeftPanel();
       }
 
       if (event.key === "]") {
         event.preventDefault();
-        playCue("toggle", 0.75);
-        openExclusivePanel("right");
+        toggleRightPanel();
       }
 
       if (event.key === "\\") {
@@ -677,7 +739,7 @@ export function DashboardLayout({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [playCue]);
+  }, [playCue, toggleLeftPanel, toggleRightPanel]);
 
   useEffect(() => {
     const onDocumentClick = (event: MouseEvent) => {
@@ -787,12 +849,166 @@ export function DashboardLayout({
     </div>
   );
 
+  const railButtonClass = (active: boolean) =>
+    `flex h-11 w-11 items-center justify-center rounded-lg border transition ${
+      active
+        ? "border-sky-500/60 bg-sky-500/15 text-sky-300"
+        : "border-slate-700/60 bg-slate-900/70 text-slate-400 hover:border-slate-500 hover:text-slate-200"
+    }`;
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#010208]">
       <div className="absolute inset-0 z-10">
         {mainPanel}
-        {renderWindow("left", "Mission Control", leftPos, 384, leftMinimized, setLeftMinimized, leftPanel)}
-        {renderWindow("right", "Atlas", rightPos, 416, rightMinimized, setRightMinimized, rightPanel)}
+        {leftVisible && renderWindow("left", "Mission Control", leftPos, 384, leftMinimized, setLeftMinimized, leftPanel)}
+        {rightVisible && renderWindow("right", "Atlas", rightPos, 416, rightMinimized, setRightMinimized, rightPanel)}
+        <div className="absolute left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-2 rounded-2xl border border-slate-800/80 bg-slate-950/70 p-2 shadow-xl backdrop-blur-md">
+          <button
+            type="button"
+            onClick={toggleLeftPanel}
+            className={railButtonClass(leftVisible)}
+            aria-label="Toggle Mission Control"
+            title="Mission Control [ [ key ]"
+          >
+            <Rocket className="h-5 w-5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={toggleRightPanel}
+            className={railButtonClass(rightVisible)}
+            aria-label="Toggle Atlas"
+            title="Atlas [ ] key ]"
+          >
+            <Compass className="h-5 w-5" aria-hidden />
+          </button>
+          <div className="my-1 h-px bg-slate-800" />
+          <button
+            type="button"
+            onClick={() => setSettingsVisible((value) => !value)}
+            className={railButtonClass(settingsVisible)}
+            aria-label="Toggle settings"
+            title="Settings"
+          >
+            <Settings className="h-5 w-5" aria-hidden />
+          </button>
+        </div>
+        {settingsVisible && (
+          <div className="absolute left-20 top-1/2 z-30 flex w-72 -translate-y-1/2 flex-col gap-4 rounded-2xl border border-slate-800/80 bg-slate-950/90 p-4 shadow-2xl backdrop-blur-md">
+            <div className="flex items-center justify-between">
+              <span className="text-xs uppercase tracking-[0.18em] text-slate-300">Settings</span>
+              <button
+                type="button"
+                onClick={() => setSettingsVisible(false)}
+                className="rounded px-1.5 py-0.5 text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
+                aria-label="Close settings"
+              >
+                {"✕"}
+              </button>
+            </div>
+
+            <label className="flex flex-col gap-1.5 text-xs text-slate-300">
+              <span className="flex items-center justify-between">
+                <span>Orbit trail opacity</span>
+                <span className="text-slate-500">{canvasSettings.orbitOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={canvasSettings.orbitOpacity}
+                onChange={(event) => updateCanvasSetting({ orbitOpacity: Number(event.target.value) })}
+                className="accent-sky-400"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-xs text-slate-300">
+              <span>Space background color</span>
+              <span className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={canvasSettings.backgroundColor}
+                  onChange={(event) => updateCanvasSetting({ backgroundColor: event.target.value })}
+                  className="h-8 w-12 cursor-pointer rounded border border-slate-700 bg-transparent p-0.5"
+                />
+                <span className="text-slate-500">{canvasSettings.backgroundColor}</span>
+              </span>
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-xs text-slate-300">
+              <span className="flex items-center justify-between">
+                <span>Render distance</span>
+                <span className="text-slate-500">{canvasSettings.renderDistance.toFixed(1)}x</span>
+              </span>
+              <input
+                type="range"
+                min={0.5}
+                max={2.5}
+                step={0.1}
+                value={canvasSettings.renderDistance}
+                onChange={(event) => updateCanvasSetting({ renderDistance: Number(event.target.value) })}
+                className="accent-sky-400"
+              />
+              <span className="text-slate-500">Lower this if a busy story starts to feel sluggish.</span>
+            </label>
+
+            <div className="flex flex-col gap-1.5 text-xs text-slate-300">
+              <span className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+                  Pretty mode
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={canvasSettings.prettyMode}
+                  onClick={() => {
+                    updateCanvasSetting({ prettyMode: !canvasSettings.prettyMode });
+                    playCue("toggle", 0.75);
+                  }}
+                  className={`relative h-5 w-9 rounded-full border transition ${
+                    canvasSettings.prettyMode ? "border-sky-400/60 bg-sky-500/40" : "border-slate-700 bg-slate-800"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-slate-100 transition ${
+                      canvasSettings.prettyMode ? "left-4" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </span>
+              <span className="text-slate-500">Bloom on the star -- sit back and look at it.</span>
+            </div>
+
+            <label className="flex flex-col gap-1.5 text-xs text-slate-300">
+              <span className="flex items-center justify-between">
+                <span>Audio</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-slate-500">{muted ? "Muted" : `${masterVolume}%`}</span>
+                  <button
+                    type="button"
+                    onClick={() => setMuted((value) => !value)}
+                    className="text-slate-400 transition hover:text-slate-100"
+                    aria-label={muted ? "Unmute" : "Mute"}
+                  >
+                    {muted ? <VolumeX className="h-3.5 w-3.5" aria-hidden /> : <Volume2 className="h-3.5 w-3.5" aria-hidden />}
+                  </button>
+                </span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={masterVolume}
+                disabled={muted}
+                onChange={(event) => setMasterVolume(Number(event.target.value))}
+                onPointerUp={() => playCue("toggle", 0.5)}
+                className={`accent-sky-400 ${muted ? "opacity-40" : ""}`}
+              />
+            </label>
+          </div>
+        )}
       </div>
     </div>
   );

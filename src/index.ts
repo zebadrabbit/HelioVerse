@@ -1,5 +1,5 @@
-export { UniverseCanvas, focusKeyFor } from "./universe-canvas";
-export type { Body, Link, UniverseCanvasProps } from "./universe-canvas";
+export { UniverseCanvas, focusKeyFor, SETTINGS_EVENT, SETTINGS_STORAGE_KEY, DEFAULT_CANVAS_SETTINGS, OPEN_EVENT } from "./universe-canvas";
+export type { Body, Link, UniverseCanvasProps, CanvasSettings } from "./universe-canvas";
 
 export { DashboardLayout, FOCUS_EVENT } from "./dashboard-layout";
 export type { DashboardLayoutProps, NotificationEvent } from "./dashboard-layout";

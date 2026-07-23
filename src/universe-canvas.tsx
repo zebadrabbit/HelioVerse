@@ -10,6 +10,11 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { Copy, Crosshair, LogIn, RotateCcw, X } from "lucide-react";
 
 /** A single node in the universe graph. Consumers map their own domain onto this. */
@@ -30,6 +35,42 @@ export type Body = {
 };
 
 export type Link = { id: string; sourceId: string; targetId: string; label?: string };
+
+// Bridge for the settings panel (rendered by DashboardLayout, a sibling
+// component) to reach the canvas live -- same pattern as FOCUS_EVENT.
+export const SETTINGS_EVENT = "helioverse:settings-changed";
+export const SETTINGS_STORAGE_KEY = "helioverse:canvas-settings:v1";
+
+export type CanvasSettings = {
+  orbitOpacity: number; // 0-100, percent multiplier on each orbit line's base opacity
+  backgroundColor: string; // hex color for the void behind the starfield
+  renderDistance: number; // 0.5-2.5 multiplier on the distance-based LOD cutoffs
+  prettyMode: boolean; // selective bloom on stars, for sitting back and looking at it
+};
+
+export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
+  orbitOpacity: 100,
+  backgroundColor: "#010208",
+  renderDistance: 1,
+  prettyMode: false,
+};
+
+function getStoredCanvasSettings(): CanvasSettings {
+  if (typeof window === "undefined") {
+    return DEFAULT_CANVAS_SETTINGS;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_CANVAS_SETTINGS;
+    }
+
+    return { ...DEFAULT_CANVAS_SETTINGS, ...(JSON.parse(raw) as Partial<CanvasSettings>) };
+  } catch {
+    return DEFAULT_CANVAS_SETTINGS;
+  }
+}
 
 /**
  * Focus keys are tier-prefixed (`root:<bodyId>` vs `node:<bodyId>`), matching
@@ -154,10 +195,20 @@ const MOON_MAX_RADIUS = 0.42;
 const SATELLITE_MIN_RADIUS = 0.14;
 const SATELLITE_MAX_RADIUS = 0.26;
 
+// Layer used for selective bloom in "pretty mode" -- only objects tagged
+// with this layer (the star and its glow) get the bloom treatment, so the
+// whole scene doesn't wash out.
+const BLOOM_LAYER = 1;
+
 const FOCUS_EVENT = "helioverse:focus-target";
 const RESET_EVENT = "helioverse:canvas-reset";
 const RADIAL_ACTION_EVENT = "helioverse:radial-action";
 const BREADCRUMB_EVENT = "helioverse:breadcrumb";
+
+// Fired when a body's "Open" action runs, so a consuming app can react (e.g.
+// open an edit form for that body) without this generic package needing to
+// know what "open" means for any particular domain.
+export const OPEN_EVENT = "helioverse:open-target";
 
 function hashString(value: string) {
   let hash = 0;
@@ -229,6 +280,20 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
   const groupCount = Math.max(roots.length, 1);
   const universeRadius = Math.max(36, Math.pow(groupCount, 0.92) * 30);
 
+  // A body with a lot of moons/satellites/notes orbiting it reads as more
+  // central to the story than its manually-set scale alone suggests -- add a
+  // family-size nudge (capped at 6 children) on top of the manual scale.
+  // This has to be additive headroom, not a blend: a blend (base * 0.7 +
+  // bonus * 0.3) caps what the "Importance" slider can ever reach at 70% of
+  // full size for anything with few children, which is most entities --
+  // making the slider feel like it barely does anything.
+  const familyScale = (nodeId: string, baseScale: number | undefined) => {
+    const base = unit(baseScale);
+    const childCount = byParent.get(nodeId)?.length ?? 0;
+    const familyBonus = clamp(childCount / 6, 0, 1);
+    return clamp(base + familyBonus * 0.18 * (1 - base), 0, 1);
+  };
+
   return roots.map((root, rootIndex) => {
     // A single root belongs dead-center at the world origin (it's the one
     // sun of this universe); the ring layout only kicks in once there's more
@@ -250,7 +315,7 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
     tier1.forEach((node) => {
       const relevance = unit(node.relevance);
       const eccentricity = pickByHash(`${node.id}:ecc`, 0.08, 0.42);
-      const planetSize = THREE.MathUtils.lerp(PLANET_MIN_RADIUS, PLANET_MAX_RADIUS, unit(node.scale));
+      const planetSize = THREE.MathUtils.lerp(PLANET_MIN_RADIUS, PLANET_MAX_RADIUS, familyScale(node.id, node.scale));
       const baseOrbitRadius = 10 + relevance * 55 + pickByHash(node.id, 1.2, 4.1);
       const safeDistanceFromRoot = rootRadius + planetSize + pickByHash(`${node.id}:root-clearance`, 0.8, 2.6);
 
@@ -292,7 +357,7 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
       const tier2 = byParent.get(planet.id) ?? [];
       tier2.forEach((node) => {
         const relevance = unit(node.relevance);
-        const moonSize = THREE.MathUtils.lerp(MOON_MIN_RADIUS, MOON_MAX_RADIUS, unit(node.scale));
+        const moonSize = THREE.MathUtils.lerp(MOON_MIN_RADIUS, MOON_MAX_RADIUS, familyScale(node.id, node.scale));
         const eccentricity = pickByHash(`${node.id}:ecc`, 0.03, 0.24);
         const baseOrbitRadius = 1.9 + relevance * 3.4 + pickByHash(node.id, 0.1, 0.8);
         const safeDistanceFromParent = parentLayout.size + moonSize + pickByHash(`${node.id}:parent-clearance`, 0.35, 1.2);
@@ -348,9 +413,17 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
         }
 
         const parentLayout = layouts.find((item) => item.id === parentBody.id);
-        const parentSize = parentLayout?.size ?? rootRadius;
+        // These satellites are placed in world space orbiting the root star's
+        // position (below), not their immediate data-parent's position -- so
+        // clearance has to respect the star's actual footprint too, or a
+        // satellite nested a couple levels deep (e.g. moon-of-a-moon) ends up
+        // with an orbit sized only against its small parent and renders
+        // clipped inside the much bigger star. The star's glow halo (below,
+        // `group.radius * 1.75`) reads as part of that footprint visually,
+        // so clear that too, not just the solid sphere.
+        const parentSize = Math.max(parentLayout?.size ?? 0, rootRadius * 1.75);
         const relevance = unit(node.relevance);
-        const satelliteSize = THREE.MathUtils.lerp(SATELLITE_MIN_RADIUS, SATELLITE_MAX_RADIUS, unit(node.scale));
+        const satelliteSize = THREE.MathUtils.lerp(SATELLITE_MIN_RADIUS, SATELLITE_MAX_RADIUS, familyScale(node.id, node.scale));
         const eccentricity = pickByHash(`${node.id}:ecc`, 0.14, 0.54);
         const baseOrbitRadius = 4.2 + relevance * 6 + satelliteIndex * 1.25;
         const safeDistanceFromParent = parentSize + satelliteSize + pickByHash(`${node.id}:parent-clearance`, 0.25, 1.1);
@@ -649,8 +722,13 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     const sceneExtent = sceneData.reduce((max, group) => Math.max(max, group.position.length()), 24);
     const defaultCameraDistance = clamp(sceneExtent * 1.15 + 22, 56, 190);
 
+    const initialSettings = getStoredCanvasSettings();
+    let orbitOpacityScale = initialSettings.orbitOpacity / 100;
+    let renderDistanceScale = initialSettings.renderDistance;
+    let prettyMode = initialSettings.prettyMode;
+
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#010208");
+    scene.background = new THREE.Color(initialSettings.backgroundColor);
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 1000);
     camera.position.set(0, defaultCameraDistance * 0.34, defaultCameraDistance);
@@ -664,16 +742,74 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     renderer.toneMappingExposure = RENDER_QUALITY.toneExposure;
     canvasHost.appendChild(renderer.domElement);
 
-    const ambient = new THREE.AmbientLight(0xb8c8ff, 0.75);
+    // "Pretty mode": selective bloom (only objects on BLOOM_LAYER -- the star
+    // and its glow -- get the effect), using the standard darken-swap
+    // technique: render bloom-layer-only objects through bloomComposer,
+    // restore materials, then composite that bloom texture additively over a
+    // normal render. Composers are cheap to keep around; when pretty mode is
+    // off the render loop just skips straight to renderer.render().
+    const bloomLayer = new THREE.Layers();
+    bloomLayer.set(BLOOM_LAYER);
+    const bloomDarkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const bloomMaterialCache = new Map<string, THREE.Material | THREE.Material[]>();
+
+    const darkenNonBloomed = (object: THREE.Object3D) => {
+      if (object instanceof THREE.Mesh && !bloomLayer.test(object.layers)) {
+        bloomMaterialCache.set(object.uuid, object.material);
+        object.material = bloomDarkMaterial;
+      }
+    };
+    const restoreMaterial = (object: THREE.Object3D) => {
+      if (object instanceof THREE.Mesh && bloomMaterialCache.has(object.uuid)) {
+        object.material = bloomMaterialCache.get(object.uuid)!;
+        bloomMaterialCache.delete(object.uuid);
+      }
+    };
+
+    const bloomComposer = new EffectComposer(renderer);
+    bloomComposer.renderToScreen = false;
+    bloomComposer.addPass(new RenderPass(scene, camera));
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(host.clientWidth, host.clientHeight), 1.1, 0.55, 0.15);
+    bloomComposer.addPass(bloomPass);
+
+    const bloomMixPass = new ShaderPass(
+      new THREE.ShaderMaterial({
+        uniforms: {
+          baseTexture: { value: null },
+          bloomTexture: { value: bloomComposer.renderTarget2.texture },
+        },
+        vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+          uniform sampler2D baseTexture;
+          uniform sampler2D bloomTexture;
+          varying vec2 vUv;
+          void main() {
+            gl_FragColor = texture2D(baseTexture, vUv) + vec4(1.0) * texture2D(bloomTexture, vUv);
+          }
+        `,
+      }),
+      "baseTexture",
+    );
+    bloomMixPass.needsSwap = true;
+
+    const finalComposer = new EffectComposer(renderer);
+    finalComposer.addPass(new RenderPass(scene, camera));
+    finalComposer.addPass(bloomMixPass);
+    finalComposer.addPass(new OutputPass());
+
+    const renderBloomed = () => {
+      scene.traverse(darkenNonBloomed);
+      bloomComposer.render();
+      scene.traverse(restoreMaterial);
+      finalComposer.render();
+    };
+
+    // Fill light only -- keeps shadowed sides visible instead of pure black.
+    // Actual illumination comes from a PointLight seated at each star (added
+    // alongside its root mesh below), so light direction tracks the sun
+    // instead of a fixed world-space rig.
+    const ambient = new THREE.AmbientLight(0xb8c8ff, 0.55);
     scene.add(ambient);
-
-    const keyLight = new THREE.DirectionalLight(0xffffff, 2.7);
-    keyLight.position.set(18, 20, 14);
-    scene.add(keyLight);
-
-    const rimLight = new THREE.DirectionalLight(0x8cc7ff, 1.25);
-    rimLight.position.set(-12, 8, -16);
-    scene.add(rimLight);
 
     const starGeometry = new THREE.BufferGeometry();
     const starCount = RENDER_QUALITY.starCount;
@@ -785,11 +921,13 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       const material = new THREE.LineBasicMaterial({
         color,
         transparent: true,
-        opacity,
+        opacity: opacity * orbitOpacityScale,
         depthWrite: false,
       });
 
-      return new THREE.LineLoop(geometry, material);
+      const line = new THREE.LineLoop(geometry, material);
+      line.userData.baseOpacity = opacity;
+      return line;
     };
 
     sceneData.forEach((group) => {
@@ -825,6 +963,11 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       groupNode.add(rootMesh);
       pickables.push(rootMesh);
       meshById.set(group.id, rootMesh);
+      rootMesh.layers.enable(BLOOM_LAYER);
+
+      const sunLight = new THREE.PointLight(0xfff2d6, Math.max(900, group.radius * 700), 0, 1.7);
+      sunLight.position.set(0, 0, 0);
+      groupNode.add(sunLight);
 
       const glow = new THREE.Mesh(
         new THREE.SphereGeometry(group.radius * 1.75, 32, 32),
@@ -835,6 +978,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
           depthWrite: false,
         }),
       );
+      glow.layers.enable(BLOOM_LAYER);
       groupNode.add(glow);
 
       group.nodes.forEach((node) => {
@@ -1065,7 +1209,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       ]);
     };
 
-    const setSelection = (mesh: THREE.Mesh | null) => {
+    const setSelection = (mesh: THREE.Mesh | null, flyTo = true) => {
       if (selectedMesh && selectedMesh !== mesh) {
         const material = selectedMesh.material as THREE.MeshStandardMaterial | undefined;
         if (material) {
@@ -1091,7 +1235,9 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       const selectedWorldPosition = new THREE.Vector3();
       mesh.getWorldPosition(selectedWorldPosition);
       targetFocus.copy(selectedWorldPosition);
-      desiredDistance = clamp(mesh.userData.focusDistance ?? 10, 2, 170);
+      if (flyTo) {
+        desiredDistance = clamp(mesh.userData.focusDistance ?? 10, 2, 170);
+      }
       const material = mesh.material as THREE.MeshStandardMaterial | undefined;
       if (material) {
         if (mesh.userData.baseEmissiveIntensity === undefined) {
@@ -1219,10 +1365,10 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         cameraFocus.add(panOffset);
         targetFocus.add(panOffset);
       } else if (didDrag) {
-        const nextYawDelta = -moveX * 0.005;
-        const nextPitchDelta = -moveY * 0.0035;
+        const nextYawDelta = moveX * 0.005;
+        const nextPitchDelta = moveY * 0.0035;
         cameraYaw += nextYawDelta;
-        cameraPitch = clamp(cameraPitch + nextPitchDelta, 0.08, 1.18);
+        cameraPitch = clamp(cameraPitch + nextPitchDelta, -1.52, 1.52);
         yawVelocity = nextYawDelta;
         pitchVelocity = nextPitchDelta;
       }
@@ -1239,7 +1385,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       if (!didDrag && dragButton === 0) {
         const picked = pickAt(event.clientX, event.clientY);
         if (picked) {
-          setSelection(picked);
+          setSelection(picked, false);
         } else {
           setSelection(null);
         }
@@ -1267,7 +1413,12 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         return;
       }
 
-      if (!picked && activeGroupId) {
+      if (picked) {
+        setSelection(picked, true);
+        return;
+      }
+
+      if (activeGroupId) {
         setSelection(null);
         setGroupView(null);
       }
@@ -1303,6 +1454,14 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
 
       if (actionId === "focus") {
         setSelection(selectedMesh);
+        window.dispatchEvent(
+          new CustomEvent(OPEN_EVENT, {
+            detail: {
+              bodyId: selectedMesh.userData.bodyId as string,
+              tier: selectedMesh.userData.tier as Tier,
+            },
+          }),
+        );
       }
 
       if (actionId === "enter-group" && selectedMesh.userData.tier === "root") {
@@ -1395,6 +1554,32 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
 
     focusByKey(focusTargetKey);
 
+    const onSettingsEvent = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<CanvasSettings>>).detail;
+      if (!detail) {
+        return;
+      }
+
+      if (typeof detail.backgroundColor === "string") {
+        scene.background = new THREE.Color(detail.backgroundColor);
+      }
+
+      if (typeof detail.orbitOpacity === "number") {
+        // The per-frame animate loop re-applies this scale to every orbit
+        // line's opacity (using each line's userData.baseOpacity), so no
+        // direct material mutation is needed here.
+        orbitOpacityScale = detail.orbitOpacity / 100;
+      }
+
+      if (typeof detail.renderDistance === "number") {
+        renderDistanceScale = detail.renderDistance;
+      }
+
+      if (typeof detail.prettyMode === "boolean") {
+        prettyMode = detail.prettyMode;
+      }
+    };
+
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
@@ -1405,6 +1590,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     window.addEventListener(RESET_EVENT, onResetEvent as EventListener);
     window.addEventListener(RADIAL_ACTION_EVENT, onRadialActionEvent as EventListener);
     window.addEventListener(BREADCRUMB_EVENT, onBreadcrumbEvent as EventListener);
+    window.addEventListener(SETTINGS_EVENT, onSettingsEvent as EventListener);
     window.addEventListener("keydown", onKeyDown);
 
     const resizeObserver = new ResizeObserver(() => {
@@ -1412,6 +1598,8 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
+      bloomComposer.setSize(width, height);
+      finalComposer.setSize(width, height);
     });
     resizeObserver.observe(canvasHost);
 
@@ -1427,7 +1615,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       if (!isDragging) {
         cameraYaw += selectedMesh ? 0.0024 : 0.0014;
         cameraYaw += yawVelocity;
-        cameraPitch = clamp(cameraPitch + pitchVelocity, 0.08, 1.18);
+        cameraPitch = clamp(cameraPitch + pitchVelocity, -1.52, 1.52);
         yawVelocity *= 0.9;
         pitchVelocity *= 0.88;
         if (Math.abs(yawVelocity) < 0.00002) {
@@ -1476,14 +1664,16 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
           }
 
           if (object instanceof THREE.LineLoop) {
+            const trackBaseOpacity = typeof object.userData.baseOpacity === "number" ? object.userData.baseOpacity : 0.38;
+            const lineOpacity = nextOpacity * orbitOpacityScale * trackBaseOpacity;
             if (Array.isArray(object.material)) {
               object.material.forEach((material) => {
                 material.transparent = true;
-                material.opacity = nextOpacity * 0.38;
+                material.opacity = lineOpacity;
               });
             } else {
               object.material.transparent = true;
-              object.material.opacity = nextOpacity * 0.38;
+              object.material.opacity = lineOpacity;
             }
           }
         });
@@ -1577,9 +1767,9 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         }
 
         const tier = mesh.userData.tier as Tier;
-        if (cameraDistance > 95 && (tier === "moon" || tier === "satellite")) {
+        if (cameraDistance > 95 * renderDistanceScale && (tier === "moon" || tier === "satellite")) {
           mesh.visible = false;
-        } else if (cameraDistance > 145 && tier === "planet") {
+        } else if (cameraDistance > 145 * renderDistanceScale && tier === "planet") {
           mesh.visible = false;
         } else {
           mesh.visible = true;
@@ -1587,9 +1777,9 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       }
 
       orbitTracks.forEach((track) => {
-        if (cameraDistance > 150 && track.tier !== "planet") {
+        if (cameraDistance > 150 * renderDistanceScale && track.tier !== "planet") {
           track.line.visible = false;
-        } else if (cameraDistance > 100 && track.tier === "moon") {
+        } else if (cameraDistance > 100 * renderDistanceScale && track.tier === "moon") {
           track.line.visible = false;
         } else {
           track.line.visible = true;
@@ -1722,7 +1912,11 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       nebulaA.rotation.z = Math.sin(time * 0.15) * 0.02;
       nebulaB.rotation.y = time * 0.004;
       nebulaB.rotation.x = Math.cos(time * 0.12) * 0.02;
-      renderer.render(scene, camera);
+      if (prettyMode) {
+        renderBloomed();
+      } else {
+        renderer.render(scene, camera);
+      }
       animationFrame = requestAnimationFrame(animate);
     };
 
@@ -1750,6 +1944,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       window.removeEventListener(RESET_EVENT, onResetEvent as EventListener);
       window.removeEventListener(RADIAL_ACTION_EVENT, onRadialActionEvent as EventListener);
       window.removeEventListener(BREADCRUMB_EVENT, onBreadcrumbEvent as EventListener);
+      window.removeEventListener(SETTINGS_EVENT, onSettingsEvent as EventListener);
       window.removeEventListener("keydown", onKeyDown);
       setAmbientLabels([]);
       setLinkLabels([]);
@@ -1780,6 +1975,9 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
           }
         }
       });
+      bloomComposer.dispose();
+      finalComposer.dispose();
+      bloomDarkMaterial.dispose();
       renderer.dispose();
       canvasHost.removeChild(renderer.domElement);
     };
