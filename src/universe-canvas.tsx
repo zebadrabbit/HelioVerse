@@ -1220,12 +1220,29 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
               }),
             );
             mesh.scale.set(1, 0.86, 1);
+            // Rim-only glow (view-space normal.z as a cheap fresnel term) instead
+            // of a flat-opacity shell -- a uniform overlay sat in front of the
+            // whole face and washed out the surface texture/shading underneath it.
             const atmosphere = new THREE.Mesh(
               new THREE.SphereGeometry(node.size * 1.14, 24, 24),
-              new THREE.MeshBasicMaterial({
-                color: nodeColor.clone().lerp(new THREE.Color("#ffffff"), 0.3),
+              new THREE.ShaderMaterial({
+                uniforms: { color: { value: nodeColor.clone().lerp(new THREE.Color("#ffffff"), 0.3) } },
+                vertexShader: `
+                  varying vec3 vNormalView;
+                  void main() {
+                    vNormalView = normalize(normalMatrix * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                  }
+                `,
+                fragmentShader: `
+                  uniform vec3 color;
+                  varying vec3 vNormalView;
+                  void main() {
+                    float rim = pow(1.0 - abs(vNormalView.z), 2.2);
+                    gl_FragColor = vec4(color, rim * 0.6);
+                  }
+                `,
                 transparent: true,
-                opacity: 0.18,
                 depthWrite: false,
               }),
             );
