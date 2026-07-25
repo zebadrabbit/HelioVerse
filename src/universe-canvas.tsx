@@ -921,7 +921,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     // Actual illumination comes from a PointLight seated at each star (added
     // alongside its root mesh below), so light direction tracks the sun
     // instead of a fixed world-space rig.
-    const ambient = new THREE.AmbientLight(0xb8c8ff, 0.55);
+    const ambient = new THREE.AmbientLight(0xb8c8ff, 0.85);
     scene.add(ambient);
 
     const starGeometry = new THREE.BufferGeometry();
@@ -1198,6 +1198,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
                 color: waterTexture ? 0xffffff : waterBase,
                 map: waterTexture ?? undefined,
                 emissive: nodeColor,
+                emissiveMap: waterTexture ?? undefined,
                 emissiveIntensity: 0.22,
                 roughness: 0.14,
                 metalness: 0.3,
@@ -1212,6 +1213,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
                 color: gasTexture ? 0xffffff : nodeColor,
                 map: gasTexture ?? undefined,
                 emissive: nodeColor,
+                emissiveMap: gasTexture ?? undefined,
                 emissiveIntensity: 0.28,
                 roughness: 0.55,
                 metalness: 0.05,
@@ -1240,6 +1242,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
                 color: rockyTexture ? 0xffffff : rockyBase,
                 map: rockyTexture ?? undefined,
                 emissive: nodeColor,
+                emissiveMap: rockyTexture ?? undefined,
                 emissiveIntensity: 0.24,
                 roughness: 0.72,
                 metalness: 0.06,
