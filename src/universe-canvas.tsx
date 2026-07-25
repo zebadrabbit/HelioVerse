@@ -1321,6 +1321,26 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         mesh.castShadow = true;
         mesh.receiveShadow = true;
 
+        // Static axial tilt (like Earth's 23 degrees) plus a per-body spin,
+        // both hash-derived so each entity reads as its own little world
+        // instead of every sphere sitting perfectly upright and still.
+        mesh.rotation.z = pickByHash(`${node.id}:axial-tilt`, -0.45, 0.45);
+        const spinSpeed = pickByHash(`${node.id}:spin-speed`, 0.05, 0.4) * (pickByHash(`${node.id}:spin-dir`, 0, 1) < 0.5 ? -1 : 1);
+        const spinPhase = pickByHash(`${node.id}:spin-phase`, 0, Math.PI * 2);
+        const meshMapTexture = (mesh.material as THREE.MeshStandardMaterial).map;
+        if (node.tier === "planet" && meshMapTexture) {
+          // A ringed planet's ring is a child of this mesh -- rotating the
+          // mesh itself would drag the ring's fixed tilt around with it and
+          // make it visibly precess/wobble. Faking the spin by scrolling the
+          // surface texture instead leaves the mesh transform (and the ring)
+          // untouched.
+          mesh.userData.spinTexture = meshMapTexture;
+          mesh.userData.spinSpeed = spinSpeed;
+        } else {
+          mesh.userData.spinPhase = spinPhase;
+          mesh.userData.spinSpeed = spinSpeed;
+        }
+
         const parentLabel = node.parentId
           ? (group.nodes.find((entry) => entry.id === node.parentId)?.label ?? (node.parentId === group.id ? group.label : "Unknown"))
           : group.label;
@@ -2057,6 +2077,13 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
               parentPosition.y + localPosition.y,
               parentPosition.z + localPosition.z,
             );
+          }
+
+          const spinTexture = nodeMesh.userData.spinTexture as THREE.Texture | undefined;
+          if (spinTexture) {
+            spinTexture.offset.x = time * (nodeMesh.userData.spinSpeed as number);
+          } else if (typeof nodeMesh.userData.spinSpeed === "number") {
+            nodeMesh.rotation.y = (nodeMesh.userData.spinPhase as number) + time * nodeMesh.userData.spinSpeed;
           }
         });
 
