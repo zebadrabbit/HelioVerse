@@ -139,6 +139,10 @@ export function DashboardLayout({
 
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [canvasSettings, setCanvasSettings] = useState<CanvasSettings>(DEFAULT_CANVAS_SETTINGS);
+  const canvasSettingsRef = useRef(canvasSettings);
+  useEffect(() => {
+    canvasSettingsRef.current = canvasSettings;
+  }, [canvasSettings]);
 
   const [leftVisible, setLeftVisible] = useState(true);
   const [rightVisible, setRightVisible] = useState(true);
@@ -208,12 +212,18 @@ export function DashboardLayout({
   }, []);
 
   const updateCanvasSetting = useCallback((patch: Partial<CanvasSettings>) => {
-    setCanvasSettings((current) => {
-      const next = { ...current, ...patch };
-      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
-      window.dispatchEvent(new CustomEvent<Partial<CanvasSettings>>(SETTINGS_EVENT, { detail: patch }));
-      return next;
-    });
+    // localStorage writes and dispatchEvent are side effects -- they used to
+    // live inside the setCanvasSettings updater, but React can invoke that
+    // updater during another component's render, and a synchronous
+    // dispatchEvent there re-enters a listener's setState mid-render
+    // ("Cannot update a component while rendering a different component").
+    // Doing the merge here (off a ref, so it doesn't need the updater form)
+    // and firing the side effects after setCanvasSettings keeps them in plain
+    // event-handler code instead.
+    const next = { ...canvasSettingsRef.current, ...patch };
+    setCanvasSettings(next);
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent<Partial<CanvasSettings>>(SETTINGS_EVENT, { detail: patch }));
   }, []);
   const [configTab, setConfigTab] = useState<ConfigTab>("audio");
 
