@@ -1251,21 +1251,37 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
           }
 
           if (hasRings(node.id)) {
-            const ring = new THREE.Mesh(
-              new THREE.RingGeometry(node.size * 1.5, node.size * 2.35, 48),
-              new THREE.MeshBasicMaterial({
-                color: nodeColor.clone().lerp(new THREE.Color("#ffffff"), 0.4),
-                transparent: true,
-                opacity: 0.55,
-                side: THREE.DoubleSide,
-                depthWrite: false,
-              }),
-            );
-            ring.rotation.x = pickByHash(`${node.id}:ring-tilt`, Math.PI / 6, Math.PI / 2.1);
-            ring.rotation.y = pickByHash(`${node.id}:ring-roll`, 0, Math.PI * 2);
-            ring.castShadow = false;
-            ring.receiveShadow = false;
-            mesh.add(ring);
+            // A handful of concentric bands (varying width/shade/opacity, with
+            // thin gaps between them) reads as a real ring system rather than
+            // one flat disc -- like Saturn's separated A/B/C bands.
+            const ringGroup = new THREE.Group();
+            const bandCount = 3 + Math.floor(pickByHash(`${node.id}:ring-bands`, 0, 3.9));
+            let radius = node.size * 1.5;
+            for (let bandIndex = 0; bandIndex < bandCount; bandIndex += 1) {
+              const bandSeed = `${node.id}:ring-band:${bandIndex}`;
+              const gap = pickByHash(`${bandSeed}:gap`, 0.04, 0.16) * node.size;
+              const width = pickByHash(`${bandSeed}:width`, 0.18, 0.5) * node.size;
+              const innerRadius = radius + gap;
+              const outerRadius = innerRadius + width;
+              const shade = pickByHash(`${bandSeed}:shade`, -0.25, 0.5);
+              const band = new THREE.Mesh(
+                new THREE.RingGeometry(innerRadius, outerRadius, 48),
+                new THREE.MeshBasicMaterial({
+                  color: nodeColor.clone().offsetHSL(0, 0, shade),
+                  transparent: true,
+                  opacity: pickByHash(`${bandSeed}:opacity`, 0.35, 0.75),
+                  side: THREE.DoubleSide,
+                  depthWrite: false,
+                }),
+              );
+              band.castShadow = false;
+              band.receiveShadow = false;
+              ringGroup.add(band);
+              radius = outerRadius;
+            }
+            ringGroup.rotation.x = pickByHash(`${node.id}:ring-tilt`, Math.PI / 6, Math.PI / 2.1);
+            ringGroup.rotation.y = pickByHash(`${node.id}:ring-roll`, 0, Math.PI * 2);
+            mesh.add(ringGroup);
           }
         } else {
           mesh = new THREE.Mesh(
