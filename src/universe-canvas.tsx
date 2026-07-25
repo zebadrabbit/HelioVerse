@@ -1161,7 +1161,8 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
                 depthWrite: false,
               }),
             );
-            ring.rotation.x = Math.PI / 2.4;
+            ring.rotation.x = pickByHash(`${node.id}:ring-tilt`, Math.PI / 6, Math.PI / 2.1);
+            ring.rotation.y = pickByHash(`${node.id}:ring-roll`, 0, Math.PI * 2);
             mesh.add(ring);
           }
         } else {
