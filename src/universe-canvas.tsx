@@ -229,6 +229,22 @@ function pickByHash(seed: string, min: number, max: number) {
   return min + (max - min) * ratio;
 }
 
+// Planet-tier bodies get a deterministic (hash-derived, not user-set) visual
+// archetype so a busy story reads as varied worlds rather than uniform balls
+// -- same "seeded by id" trick already used above for orbit shape/tilt/phase.
+type PlanetKind = "rocky" | "water" | "gasGiant";
+
+function pickPlanetKind(seed: string): PlanetKind {
+  const ratio = pickByHash(`${seed}:kind`, 0, 1);
+  if (ratio < 0.34) return "rocky";
+  if (ratio < 0.67) return "water";
+  return "gasGiant";
+}
+
+function hasRings(seed: string) {
+  return pickByHash(`${seed}:rings`, 0, 1) < 0.22;
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1080,6 +1096,68 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
               metalness: 0.15,
             }),
           );
+        } else if (node.tier === "planet") {
+          const planetKind = pickPlanetKind(node.id);
+          if (planetKind === "water") {
+            mesh = new THREE.Mesh(
+              new THREE.SphereGeometry(node.size, 24, 24),
+              new THREE.MeshStandardMaterial({
+                color: nodeColor.clone().lerp(new THREE.Color("#1e5fae"), 0.55),
+                emissive: nodeColor,
+                emissiveIntensity: 0.22,
+                roughness: 0.14,
+                metalness: 0.3,
+              }),
+            );
+          } else if (planetKind === "gasGiant") {
+            mesh = new THREE.Mesh(
+              new THREE.SphereGeometry(node.size, 24, 24),
+              new THREE.MeshStandardMaterial({
+                color: nodeColor,
+                emissive: nodeColor,
+                emissiveIntensity: 0.28,
+                roughness: 0.55,
+                metalness: 0.05,
+              }),
+            );
+            mesh.scale.set(1, 0.86, 1);
+            const atmosphere = new THREE.Mesh(
+              new THREE.SphereGeometry(node.size * 1.14, 24, 24),
+              new THREE.MeshBasicMaterial({
+                color: nodeColor.clone().lerp(new THREE.Color("#ffffff"), 0.3),
+                transparent: true,
+                opacity: 0.18,
+                depthWrite: false,
+              }),
+            );
+            mesh.add(atmosphere);
+          } else {
+            mesh = new THREE.Mesh(
+              new THREE.SphereGeometry(node.size, 24, 24),
+              new THREE.MeshStandardMaterial({
+                color: nodeColor.clone().lerp(new THREE.Color("#7a6a56"), 0.35),
+                emissive: nodeColor,
+                emissiveIntensity: 0.24,
+                roughness: 0.72,
+                metalness: 0.06,
+              }),
+            );
+          }
+
+          if (hasRings(node.id)) {
+            const ring = new THREE.Mesh(
+              new THREE.RingGeometry(node.size * 1.5, node.size * 2.35, 48),
+              new THREE.MeshBasicMaterial({
+                color: nodeColor.clone().lerp(new THREE.Color("#ffffff"), 0.4),
+                transparent: true,
+                opacity: 0.55,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+              }),
+            );
+            ring.rotation.x = Math.PI / 2.4;
+            mesh.add(ring);
+          }
         } else {
           mesh = new THREE.Mesh(
             new THREE.SphereGeometry(node.size, 24, 24),
