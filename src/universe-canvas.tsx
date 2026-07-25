@@ -851,6 +851,8 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = RENDER_QUALITY.toneExposure;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     canvasHost.appendChild(renderer.domElement);
 
     // "Pretty mode": selective bloom (only objects on BLOOM_LAYER -- the star
@@ -1128,6 +1130,8 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         focusDistance: Math.max(8, group.radius * 8.5),
         details: [{ label: "Children", value: String(childCount) }],
       };
+      rootMesh.castShadow = false;
+      rootMesh.receiveShadow = false;
       groupNode.add(rootMesh);
       pickables.push(rootMesh);
       meshById.set(group.id, rootMesh);
@@ -1140,6 +1144,11 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         1.7,
       );
       sunLight.position.set(0, 0, 0);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.set(1024, 1024);
+      sunLight.shadow.bias = -0.0015;
+      sunLight.shadow.camera.near = 0.5;
+      sunLight.shadow.camera.far = 400;
       groupNode.add(sunLight);
 
       // UnrealBloomPass blurs through several halved-resolution mip levels; once the star's
@@ -1218,6 +1227,8 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
                 depthWrite: false,
               }),
             );
+            atmosphere.castShadow = false;
+            atmosphere.receiveShadow = false;
             mesh.add(atmosphere);
           } else {
             const rockyBase = nodeColor.clone().lerp(new THREE.Color("#7a6a56"), 0.35);
@@ -1249,6 +1260,8 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
             );
             ring.rotation.x = pickByHash(`${node.id}:ring-tilt`, Math.PI / 6, Math.PI / 2.1);
             ring.rotation.y = pickByHash(`${node.id}:ring-roll`, 0, Math.PI * 2);
+            ring.castShadow = false;
+            ring.receiveShadow = false;
             mesh.add(ring);
           }
         } else {
@@ -1263,6 +1276,9 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
             }),
           );
         }
+
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
 
         const parentLabel = node.parentId
           ? (group.nodes.find((entry) => entry.id === node.parentId)?.label ?? (node.parentId === group.id ? group.label : "Unknown"))
