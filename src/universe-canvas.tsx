@@ -987,6 +987,134 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
 
+    // Ambient background debris (asteroids tumbling, comets streaking by) --
+    // pure eye candy, not tied to any story/entity. Motion is a closed-form
+    // function of the shared "time" clock (a sine drift, not integrated
+    // per-frame state), matching how orbits elsewhere in this file are
+    // computed, so a comet's trail can be sampled at past time offsets
+    // without keeping any history buffer.
+    const debrisGroup = new THREE.Group();
+    groupRoot.add(debrisGroup);
+
+    type Asteroid = {
+      mesh: THREE.Mesh;
+      origin: THREE.Vector3;
+      direction: THREE.Vector3;
+      range: number;
+      speed: number;
+      phase: number;
+      spin: THREE.Vector3;
+    };
+    const ASTEROID_COUNT = 22;
+    const asteroids: Asteroid[] = [];
+    for (let index = 0; index < ASTEROID_COUNT; index += 1) {
+      const seed = `asteroid:${index}`;
+      const originRadius = sceneExtent * pickByHash(`${seed}:radius`, 0.75, 1.7);
+      const theta = pickByHash(`${seed}:theta`, 0, Math.PI * 2);
+      const phi = pickByHash(`${seed}:phi`, 0.3, Math.PI - 0.3);
+      const origin = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta) * originRadius,
+        Math.cos(phi) * originRadius * 0.4,
+        Math.sin(phi) * Math.sin(theta) * originRadius,
+      );
+      const direction = new THREE.Vector3(
+        pickByHash(`${seed}:dx`, -1, 1),
+        pickByHash(`${seed}:dy`, -0.3, 0.3),
+        pickByHash(`${seed}:dz`, -1, 1),
+      ).normalize();
+      const size = pickByHash(`${seed}:size`, 0.12, 0.4);
+      const rockColor = new THREE.Color("#8a8378").offsetHSL(0, 0, pickByHash(`${seed}:shade`, -0.15, 0.15));
+      const rockTexture = createPlanetTexture("rocky", rockColor, seed);
+      if (rockTexture) planetTextures.push(rockTexture);
+      const mesh = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(size, 0),
+        new THREE.MeshStandardMaterial({
+          color: rockTexture ? 0xffffff : rockColor,
+          map: rockTexture ?? undefined,
+          roughness: 0.95,
+          metalness: 0.05,
+        }),
+      );
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      debrisGroup.add(mesh);
+      asteroids.push({
+        mesh,
+        origin,
+        direction,
+        range: sceneExtent * pickByHash(`${seed}:range`, 0.22, 0.55),
+        speed: pickByHash(`${seed}:speed`, 0.1, 0.32),
+        phase: pickByHash(`${seed}:phase`, 0, Math.PI * 2),
+        spin: new THREE.Vector3(
+          pickByHash(`${seed}:spinx`, 0.2, 1.1),
+          pickByHash(`${seed}:spiny`, 0.2, 1.1),
+          pickByHash(`${seed}:spinz`, 0.2, 1.1),
+        ),
+      });
+    }
+
+    type Comet = {
+      head: THREE.Mesh;
+      trail: THREE.Line;
+      trailPositions: Float32Array;
+      trailColors: Float32Array;
+      origin: THREE.Vector3;
+      direction: THREE.Vector3;
+      range: number;
+      speed: number;
+      phase: number;
+      color: THREE.Color;
+    };
+    const COMET_COUNT = 5;
+    const COMET_TRAIL_LENGTH = 12;
+    const COMET_TRAIL_STEP = 0.3;
+    const comets: Comet[] = [];
+    for (let index = 0; index < COMET_COUNT; index += 1) {
+      const seed = `comet:${index}`;
+      const originRadius = sceneExtent * pickByHash(`${seed}:radius`, 0.8, 1.8);
+      const theta = pickByHash(`${seed}:theta`, 0, Math.PI * 2);
+      const phi = pickByHash(`${seed}:phi`, 0.25, Math.PI - 0.25);
+      const origin = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta) * originRadius,
+        Math.cos(phi) * originRadius * 0.45,
+        Math.sin(phi) * Math.sin(theta) * originRadius,
+      );
+      const direction = new THREE.Vector3(
+        pickByHash(`${seed}:dx`, -1, 1),
+        pickByHash(`${seed}:dy`, -0.2, 0.2),
+        pickByHash(`${seed}:dz`, -1, 1),
+      ).normalize();
+      const color = new THREE.Color().setHSL(pickByHash(`${seed}:hue`, 0.5, 0.62), 0.6, 0.82);
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 10), new THREE.MeshBasicMaterial({ color }));
+      head.layers.enable(BLOOM_LAYER);
+      debrisGroup.add(head);
+
+      const trailPositions = new Float32Array(COMET_TRAIL_LENGTH * 3);
+      const trailColors = new Float32Array(COMET_TRAIL_LENGTH * 3);
+      const trailGeometry = new THREE.BufferGeometry();
+      trailGeometry.setAttribute("position", new THREE.BufferAttribute(trailPositions, 3));
+      trailGeometry.setAttribute("color", new THREE.BufferAttribute(trailColors, 3));
+      const trail = new THREE.Line(
+        trailGeometry,
+        new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false }),
+      );
+      debrisGroup.add(trail);
+
+      comets.push({
+        head,
+        trail,
+        trailPositions,
+        trailColors,
+        origin,
+        direction,
+        range: sceneExtent * pickByHash(`${seed}:range`, 0.35, 0.7),
+        speed: pickByHash(`${seed}:speed`, 0.22, 0.5),
+        phase: pickByHash(`${seed}:phase`, 0, Math.PI * 2),
+        color,
+      });
+    }
+
     const cameraFocus = new THREE.Vector3(0, 0, 0);
     const targetFocus = new THREE.Vector3(0, 0, 0);
     let cameraDistance = defaultCameraDistance;
@@ -2094,6 +2222,35 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         });
       });
 
+      asteroids.forEach((asteroid) => {
+        const offset = Math.sin(time * asteroid.speed + asteroid.phase) * asteroid.range;
+        asteroid.mesh.position.copy(asteroid.origin).addScaledVector(asteroid.direction, offset);
+        asteroid.mesh.rotation.set(time * asteroid.spin.x, time * asteroid.spin.y, time * asteroid.spin.z);
+      });
+
+      comets.forEach((comet) => {
+        for (let point = 0; point < COMET_TRAIL_LENGTH; point += 1) {
+          const sampleTime = time - point * COMET_TRAIL_STEP;
+          const offset = Math.sin(sampleTime * comet.speed + comet.phase) * comet.range;
+          const x = comet.origin.x + comet.direction.x * offset;
+          const y = comet.origin.y + comet.direction.y * offset;
+          const z = comet.origin.z + comet.direction.z * offset;
+          comet.trailPositions[point * 3] = x;
+          comet.trailPositions[point * 3 + 1] = y;
+          comet.trailPositions[point * 3 + 2] = z;
+          const fade = 1 - point / COMET_TRAIL_LENGTH;
+          comet.trailColors[point * 3] = comet.color.r * fade;
+          comet.trailColors[point * 3 + 1] = comet.color.g * fade;
+          comet.trailColors[point * 3 + 2] = comet.color.b * fade;
+          if (point === 0) {
+            comet.head.position.set(x, y, z);
+          }
+        }
+        (comet.trail.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+        (comet.trail.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+        comet.trail.geometry.computeBoundingSphere();
+      });
+
       const antPhase = ((-time * 0.55) % 1 + 1) % 1;
       const selectedBodyId = selectedMesh?.userData.bodyId as string | undefined;
       const sourceWorld = new THREE.Vector3();
@@ -2334,7 +2491,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
           }
         }
 
-        if (object instanceof THREE.LineLoop) {
+        if (object instanceof THREE.Line) {
           object.geometry.dispose();
           if (Array.isArray(object.material)) {
             object.material.forEach((material) => material.dispose());
