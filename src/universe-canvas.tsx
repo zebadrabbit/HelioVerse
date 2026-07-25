@@ -107,6 +107,7 @@ type ContextPanelState = {
   status: string;
   accent: string;
   details: Array<{ label: string; value: string }>;
+  relationships: Array<{ label: string; otherLabel: string }>;
   screenX: number;
   screenY: number;
   panelX: number;
@@ -606,6 +607,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     status: "",
     accent: "#22d3ee",
     details: [],
+    relationships: [],
     screenX: 0,
     screenY: 0,
     panelX: 0,
@@ -922,6 +924,10 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     let lastOverlayUpdate = 0;
     let lastLabelUpdate = 0;
     let selectedMesh: THREE.Mesh | null = null;
+    // True once the user dismisses the context panel while keeping the
+    // selection/camera focus -- stops the per-frame sync below from
+    // reopening the panel it was just told to hide.
+    let panelDismissed = false;
     let dragPointerId: number | null = null;
     let dragButton: number | null = null;
     let isDragging = false;
@@ -1372,6 +1378,17 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       ]);
     };
 
+    const relationshipsFor = (bodyId: string) =>
+      linkLines
+        .filter((linkLine) => linkLine.sourceId === bodyId || linkLine.targetId === bodyId)
+        .map((linkLine) => {
+          const otherMesh = linkLine.sourceId === bodyId ? linkLine.targetMesh : linkLine.sourceMesh;
+          return {
+            label: linkLine.label ?? "related",
+            otherLabel: (otherMesh.userData.label as string) ?? "Unknown",
+          };
+        });
+
     const setSelection = (mesh: THREE.Mesh | null, flyTo = true) => {
       if (selectedMesh && selectedMesh !== mesh) {
         const material = selectedMesh.material as THREE.MeshStandardMaterial | undefined;
@@ -1381,6 +1398,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       }
 
       selectedMesh = mesh;
+      panelDismissed = false;
 
       if (!mesh) {
         if (!activeGroupId) {
@@ -1447,6 +1465,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         status: mesh.userData.status as string,
         accent,
         details: (mesh.userData.details as Array<{ label: string; value: string }> | undefined) ?? [],
+        relationships: relationshipsFor(mesh.userData.bodyId as string),
         screenX: screen.x,
         screenY: screen.y,
         panelX,
@@ -1644,7 +1663,9 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       }
 
       if (actionId === "dismiss") {
-        setSelection(null);
+        panelDismissed = true;
+        setPanelOverflowOpen(false);
+        setContextPanel((current) => ({ ...current, open: false }));
       }
 
       setRadialMenu((current) => ({ ...current, open: false }));
@@ -2043,7 +2064,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         selectedMesh.getWorldPosition(selectedWorld);
         targetFocus.lerp(selectedWorld, 0.12);
 
-        if (performance.now() - lastOverlayUpdate > 42) {
+        if (!panelDismissed && performance.now() - lastOverlayUpdate > 42) {
           const screen = worldToScreen(selectedWorld);
           const panelOnRight = screen.x < canvasHost.clientWidth * 0.52;
           const panelX = clamp(
@@ -2287,6 +2308,19 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
                   </Fragment>
                 ))}
               </div>
+              {contextPanel.relationships.length > 0 ? (
+                <div className="mt-2 border-t border-cyan-100/10 pt-2 text-[11px]">
+                  <p className="uppercase tracking-[0.14em] text-cyan-100/50">Relationships</p>
+                  <ul className="mt-1 grid gap-0.5">
+                    {contextPanel.relationships.map((relationship, index) => (
+                      <li key={`${relationship.otherLabel}-${index}`} className="flex items-center justify-between gap-2">
+                        <span className="truncate font-mono text-cyan-50/85">{relationship.otherLabel}</span>
+                        <span className="shrink-0 text-cyan-100/50">{relationship.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               <div className="mt-3 flex items-center gap-1.5">
                 {contextActionsFor(selectedTier).map((action) => (
                   <button
