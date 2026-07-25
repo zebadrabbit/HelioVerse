@@ -49,6 +49,7 @@ export type CanvasSettings = {
   backgroundColor: string; // hex color for the void behind the starfield
   renderDistance: number; // 0.5-2.5 multiplier on the distance-based LOD cutoffs
   prettyMode: boolean; // selective bloom on stars, for sitting back and looking at it
+  clustering: number; // 0.5-2.5 multiplier on orbit radii -- how spread out bodies are
 };
 
 export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
@@ -57,6 +58,7 @@ export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
   backgroundColor: "#010208",
   renderDistance: 1,
   prettyMode: false,
+  clustering: 1,
 };
 
 function getStoredCanvasSettings(): CanvasSettings {
@@ -269,7 +271,7 @@ function orbitPoint(
  * moons tracking the parent each frame; anything deeper becomes satellites orbiting the
  * root (mirroring the original Heliospheric satellite behavior).
  */
-function layoutUniverse(bodies: Body[]): OrbitGroup[] {
+function layoutUniverse(bodies: Body[], clustering = 1): OrbitGroup[] {
   const byId = new Map(bodies.map((body) => [body.id, body]));
   const byParent = new Map<string, Body[]>();
   bodies.forEach((body) => {
@@ -282,7 +284,7 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
 
   const roots = bodies.filter((body) => !body.parentId || !byId.has(body.parentId));
   const groupCount = Math.max(roots.length, 1);
-  const universeRadius = Math.max(36, Math.pow(groupCount, 0.92) * 30);
+  const universeRadius = Math.max(36, Math.pow(groupCount, 0.92) * 30) * clustering;
 
   // A body with a lot of moons/satellites/notes orbiting it reads as more
   // central to the story than its manually-set scale alone suggests -- add a
@@ -320,7 +322,7 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
       const relevance = unit(node.relevance);
       const eccentricity = pickByHash(`${node.id}:ecc`, 0.08, 0.42);
       const planetSize = THREE.MathUtils.lerp(PLANET_MIN_RADIUS, PLANET_MAX_RADIUS, familyScale(node.id, node.scale));
-      const baseOrbitRadius = 10 + relevance * 55 + pickByHash(node.id, 1.2, 4.1);
+      const baseOrbitRadius = (10 + relevance * 55 + pickByHash(node.id, 1.2, 4.1)) * clustering;
       const safeDistanceFromRoot = rootRadius + planetSize + pickByHash(`${node.id}:root-clearance`, 0.8, 2.6);
 
       let orbitRadius = Math.max(baseOrbitRadius, safeDistanceFromRoot + pickByHash(`${node.id}:major-bias`, 0.2, 2.2));
@@ -363,7 +365,7 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
         const relevance = unit(node.relevance);
         const moonSize = THREE.MathUtils.lerp(MOON_MIN_RADIUS, MOON_MAX_RADIUS, familyScale(node.id, node.scale));
         const eccentricity = pickByHash(`${node.id}:ecc`, 0.03, 0.24);
-        const baseOrbitRadius = 1.9 + relevance * 3.4 + pickByHash(node.id, 0.1, 0.8);
+        const baseOrbitRadius = (1.9 + relevance * 3.4 + pickByHash(node.id, 0.1, 0.8)) * clustering;
         const safeDistanceFromParent = parentLayout.size + moonSize + pickByHash(`${node.id}:parent-clearance`, 0.35, 1.2);
 
         let orbitRadius = Math.max(baseOrbitRadius, safeDistanceFromParent + pickByHash(`${node.id}:major-bias`, 0.08, 0.75));
@@ -429,7 +431,7 @@ function layoutUniverse(bodies: Body[]): OrbitGroup[] {
         const relevance = unit(node.relevance);
         const satelliteSize = THREE.MathUtils.lerp(SATELLITE_MIN_RADIUS, SATELLITE_MAX_RADIUS, familyScale(node.id, node.scale));
         const eccentricity = pickByHash(`${node.id}:ecc`, 0.14, 0.54);
-        const baseOrbitRadius = 4.2 + relevance * 6 + satelliteIndex * 1.25;
+        const baseOrbitRadius = (4.2 + relevance * 6 + satelliteIndex * 1.25) * clustering;
         const safeDistanceFromParent = parentSize + satelliteSize + pickByHash(`${node.id}:parent-clearance`, 0.25, 1.1);
 
         let orbitRadius = Math.max(baseOrbitRadius, safeDistanceFromParent + pickByHash(`${node.id}:major-bias`, 0.3, 1.4));
@@ -606,8 +608,20 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
   const [ambientLabels, setAmbientLabels] = useState<AmbientLabel[]>([]);
   const [linkLabels, setLinkLabels] = useState<LinkLabel[]>([]);
   const [leaderDotProgress, setLeaderDotProgress] = useState(0);
+  const [clustering, setClustering] = useState(() => getStoredCanvasSettings().clustering);
 
-  const sceneData = useMemo(() => layoutUniverse(bodies), [bodies]);
+  useEffect(() => {
+    const handleSettingsChange = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<CanvasSettings>>).detail;
+      if (typeof detail?.clustering === "number") {
+        setClustering(detail.clustering);
+      }
+    };
+    window.addEventListener(SETTINGS_EVENT, handleSettingsChange);
+    return () => window.removeEventListener(SETTINGS_EVENT, handleSettingsChange);
+  }, []);
+
+  const sceneData = useMemo(() => layoutUniverse(bodies, clustering), [bodies, clustering]);
   const radialPlacements = useMemo<RadialPlacement[]>(() => {
     if (!radialMenu.open || radialMenu.actions.length === 0) {
       return [];

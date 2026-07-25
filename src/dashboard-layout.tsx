@@ -968,6 +968,23 @@ export function DashboardLayout({
               <span className="text-slate-500">Lower this if a busy story starts to feel sluggish.</span>
             </label>
 
+            <label className="flex flex-col gap-1.5 text-xs text-slate-300">
+              <span className="flex items-center justify-between">
+                <span>Clustering</span>
+                <span className="text-slate-500">{canvasSettings.clustering.toFixed(1)}x</span>
+              </span>
+              <input
+                type="range"
+                min={0.5}
+                max={2.5}
+                step={0.1}
+                value={canvasSettings.clustering}
+                onChange={(event) => updateCanvasSetting({ clustering: Number(event.target.value) })}
+                className="accent-sky-400"
+              />
+              <span className="text-slate-500">Higher spreads bodies further apart; lower packs them in tight.</span>
+            </label>
+
             <div className="flex flex-col gap-1.5 text-xs text-slate-300">
               <span className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
