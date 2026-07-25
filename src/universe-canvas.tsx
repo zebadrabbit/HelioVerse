@@ -1283,16 +1283,21 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
               const shade = pickByHash(`${bandSeed}:shade`, -0.25, 0.5);
               const band = new THREE.Mesh(
                 new THREE.RingGeometry(innerRadius, outerRadius, 48),
-                new THREE.MeshBasicMaterial({
+                // MeshStandardMaterial (not Basic) so the band actually responds
+                // to the star's light/shadow instead of rendering as a flat,
+                // unlit color regardless of what's blocking the sun.
+                new THREE.MeshStandardMaterial({
                   color: nodeColor.clone().offsetHSL(0, 0, shade),
+                  roughness: 1,
+                  metalness: 0,
                   transparent: true,
-                  opacity: pickByHash(`${bandSeed}:opacity`, 0.35, 0.75),
+                  opacity: pickByHash(`${bandSeed}:opacity`, 0.18, 0.42),
                   side: THREE.DoubleSide,
                   depthWrite: false,
                 }),
               );
               band.castShadow = false;
-              band.receiveShadow = false;
+              band.receiveShadow = true;
               ringGroup.add(band);
               radius = outerRadius;
             }
