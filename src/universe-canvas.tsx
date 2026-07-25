@@ -185,7 +185,7 @@ type OrbitGroup = Body & {
 
 const RENDER_QUALITY = {
   maxPixelRatio: 2.2,
-  toneExposure: 1.1,
+  toneExposure: 0.92,
   starCount: 820,
 };
 
@@ -921,7 +921,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     // Actual illumination comes from a PointLight seated at each star (added
     // alongside its root mesh below), so light direction tracks the sun
     // instead of a fixed world-space rig.
-    const ambient = new THREE.AmbientLight(0xb8c8ff, 0.85);
+    const ambient = new THREE.AmbientLight(0xb8c8ff, 0.68);
     scene.add(ambient);
 
     const starGeometry = new THREE.BufferGeometry();
