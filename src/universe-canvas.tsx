@@ -246,6 +246,80 @@ function hasRings(seed: string) {
   return pickByHash(`${seed}:rings`, 0, 1) < 0.22;
 }
 
+// Deterministic PRNG (vs. Math.random()) so a planet's surface texture is
+// stable across re-renders instead of reshuffling every scene rebuild.
+function mulberry32(seed: number) {
+  let state = seed | 0;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Cheap canvas-painted surface detail per planet kind -- craters for rocky,
+// soft cloud/wave blotches for water, horizontal turbulent bands for gas
+// giants. Returns null off-DOM (SSR/tests) so callers just skip the map.
+function createPlanetTexture(kind: PlanetKind, baseColor: THREE.Color, seed: string): THREE.CanvasTexture | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = kind === "gasGiant" ? 128 : 96;
+  canvas.height = kind === "gasGiant" ? 64 : 96;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return null;
+  }
+
+  const rand = mulberry32(hashString(seed));
+  ctx.fillStyle = `#${baseColor.getHexString()}`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalAlpha = 0.5;
+
+  if (kind === "gasGiant") {
+    const bandCount = 6 + Math.floor(rand() * 5);
+    for (let index = 0; index < bandCount; index += 1) {
+      const y = (index / bandCount) * canvas.height;
+      const bandHeight = (canvas.height / bandCount) * (0.6 + rand() * 0.7);
+      const shade = baseColor.clone().offsetHSL(0, 0, (rand() - 0.5) * 0.24);
+      ctx.fillStyle = `#${shade.getHexString()}`;
+      ctx.fillRect(0, y, canvas.width, bandHeight);
+    }
+  } else if (kind === "water") {
+    for (let index = 0; index < 36; index += 1) {
+      const x = rand() * canvas.width;
+      const y = rand() * canvas.height;
+      const radius = 3 + rand() * 9;
+      const shade = baseColor.clone().offsetHSL(0, 0, 0.1 + rand() * 0.12);
+      ctx.fillStyle = `#${shade.getHexString()}`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, radius, radius * 0.4, rand() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    for (let index = 0; index < 100; index += 1) {
+      const x = rand() * canvas.width;
+      const y = rand() * canvas.height;
+      const radius = 1 + rand() * 4;
+      const darker = rand() > 0.5;
+      const shade = baseColor.clone().offsetHSL(0, 0, darker ? -(0.1 + rand() * 0.2) : 0.08 + rand() * 0.16);
+      ctx.fillStyle = `#${shade.getHexString()}`;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -906,6 +980,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     const nodeMeshesByGroup: Map<string, THREE.Mesh>[] = [];
     const moonOrbitTracksByGroup: Array<Array<{ line: THREE.LineLoop; parentId: string | null }>> = [];
     const starMaterials: THREE.ShaderMaterial[] = [];
+    const planetTextures: THREE.CanvasTexture[] = [];
     const orbitTracks: Array<{ line: THREE.LineLoop; tier: Tier }> = [];
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -1105,10 +1180,14 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         } else if (node.tier === "planet") {
           const planetKind = pickPlanetKind(node.id);
           if (planetKind === "water") {
+            const waterBase = nodeColor.clone().lerp(new THREE.Color("#1e5fae"), 0.55);
+            const waterTexture = createPlanetTexture("water", waterBase, node.id);
+            if (waterTexture) planetTextures.push(waterTexture);
             mesh = new THREE.Mesh(
               new THREE.SphereGeometry(node.size, 24, 24),
               new THREE.MeshStandardMaterial({
-                color: nodeColor.clone().lerp(new THREE.Color("#1e5fae"), 0.55),
+                color: waterTexture ? 0xffffff : waterBase,
+                map: waterTexture ?? undefined,
                 emissive: nodeColor,
                 emissiveIntensity: 0.22,
                 roughness: 0.14,
@@ -1116,10 +1195,13 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
               }),
             );
           } else if (planetKind === "gasGiant") {
+            const gasTexture = createPlanetTexture("gasGiant", nodeColor, node.id);
+            if (gasTexture) planetTextures.push(gasTexture);
             mesh = new THREE.Mesh(
               new THREE.SphereGeometry(node.size, 24, 24),
               new THREE.MeshStandardMaterial({
-                color: nodeColor,
+                color: gasTexture ? 0xffffff : nodeColor,
+                map: gasTexture ?? undefined,
                 emissive: nodeColor,
                 emissiveIntensity: 0.28,
                 roughness: 0.55,
@@ -1138,10 +1220,14 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
             );
             mesh.add(atmosphere);
           } else {
+            const rockyBase = nodeColor.clone().lerp(new THREE.Color("#7a6a56"), 0.35);
+            const rockyTexture = createPlanetTexture("rocky", rockyBase, node.id);
+            if (rockyTexture) planetTextures.push(rockyTexture);
             mesh = new THREE.Mesh(
               new THREE.SphereGeometry(node.size, 24, 24),
               new THREE.MeshStandardMaterial({
-                color: nodeColor.clone().lerp(new THREE.Color("#7a6a56"), 0.35),
+                color: rockyTexture ? 0xffffff : rockyBase,
+                map: rockyTexture ?? undefined,
                 emissive: nodeColor,
                 emissiveIntensity: 0.24,
                 roughness: 0.72,
@@ -2149,6 +2235,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       });
       mutedLinkMaterial.dispose();
       antsMaterial.dispose();
+      planetTextures.forEach((texture) => texture.dispose());
       groupRoot.traverse((object) => {
         if (object instanceof THREE.Mesh) {
           object.geometry.dispose();
