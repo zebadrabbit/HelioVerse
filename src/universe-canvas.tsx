@@ -1546,7 +1546,11 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         if (mesh.userData.baseEmissiveIntensity === undefined) {
           mesh.userData.baseEmissiveIntensity = material.emissiveIntensity;
         }
-        material.emissiveIntensity = (mesh.userData.baseEmissiveIntensity ?? 0.2) + 0.8;
+        // Was +0.8 -- fine back when materials were flat colors, but now that
+        // planets carry a textured emissiveMap, a boost that big pushes the
+        // combined output past the tone mapper's headroom and clips the whole
+        // sphere to a flat, washed-out highlight instead of a bright accent.
+        material.emissiveIntensity = (mesh.userData.baseEmissiveIntensity ?? 0.2) + 0.3;
       }
 
       const name = mesh.userData.label as string;
