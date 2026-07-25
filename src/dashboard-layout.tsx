@@ -923,6 +923,22 @@ export function DashboardLayout({
             </label>
 
             <label className="flex flex-col gap-1.5 text-xs text-slate-300">
+              <span className="flex items-center justify-between">
+                <span>Relationship trail opacity</span>
+                <span className="text-slate-500">{canvasSettings.linkOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={canvasSettings.linkOpacity}
+                onChange={(event) => updateCanvasSetting({ linkOpacity: Number(event.target.value) })}
+                className="accent-sky-400"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-xs text-slate-300">
               <span>Space background color</span>
               <span className="flex items-center gap-2">
                 <input

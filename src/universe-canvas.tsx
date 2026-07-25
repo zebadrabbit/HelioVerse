@@ -32,6 +32,8 @@ export type Body = {
   parentId?: string;
   /** Optional, free-form; only used for a status-color accent when provided. */
   status?: string;
+  /** Star-only. 0..3ish, multiplies surface brightness (and thus bloom strength). Defaults to 1. */
+  bloomIntensity?: number;
 };
 
 export type Link = { id: string; sourceId: string; targetId: string; label?: string };
@@ -43,6 +45,7 @@ export const SETTINGS_STORAGE_KEY = "helioverse:canvas-settings:v1";
 
 export type CanvasSettings = {
   orbitOpacity: number; // 0-100, percent multiplier on each orbit line's base opacity
+  linkOpacity: number; // 0-100, percent multiplier on relationship-trail line opacity
   backgroundColor: string; // hex color for the void behind the starfield
   renderDistance: number; // 0.5-2.5 multiplier on the distance-based LOD cutoffs
   prettyMode: boolean; // selective bloom on stars, for sitting back and looking at it
@@ -50,6 +53,7 @@ export type CanvasSettings = {
 
 export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
   orbitOpacity: 100,
+  linkOpacity: 100,
   backgroundColor: "#010208",
   renderDistance: 1,
   prettyMode: false,
@@ -724,6 +728,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
 
     const initialSettings = getStoredCanvasSettings();
     let orbitOpacityScale = initialSettings.orbitOpacity / 100;
+    let linkOpacityScale = initialSettings.linkOpacity / 100;
     let renderDistanceScale = initialSettings.renderDistance;
     let prettyMode = initialSettings.prettyMode;
 
@@ -819,7 +824,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
       starPositions[index * 3] = Math.sin(phi) * Math.cos(theta) * radius;
-      starPositions[index * 3 + 1] = Math.cos(phi) * radius * 0.45;
+      starPositions[index * 3 + 1] = Math.cos(phi) * radius;
       starPositions[index * 3 + 2] = Math.sin(phi) * Math.sin(theta) * radius;
     }
     starGeometry.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
@@ -868,6 +873,7 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
     const meshById = new Map<string, THREE.Mesh>();
     const nodeMeshesByGroup: Map<string, THREE.Mesh>[] = [];
     const moonOrbitTracksByGroup: Array<Array<{ line: THREE.LineLoop; parentId: string | null }>> = [];
+    const starMaterials: THREE.ShaderMaterial[] = [];
     const orbitTracks: Array<{ line: THREE.LineLoop; tier: Tier }> = [];
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -938,14 +944,65 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       const moonTracks: Array<{ line: THREE.LineLoop; parentId: string | null }> = [];
 
       const rootColor = new THREE.Color(group.color || "#6ee7a8");
-      const rootMaterial = new THREE.MeshStandardMaterial({
-        color: rootColor,
-        emissive: rootColor,
-        emissiveIntensity: 1.2,
-        roughness: 0.25,
-        metalness: 0.05,
+      const rootMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          time: { value: 0 },
+          color: { value: rootColor },
+          bloomIntensity: { value: group.bloomIntensity ?? 1 },
+        },
+        vertexShader: `
+          varying vec3 vWorldNormal;
+          varying vec3 vWorldPosition;
+          varying vec3 vPosition;
+          void main() {
+            vWorldNormal = normalize(mat3(modelMatrix) * normal);
+            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+            vPosition = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float time;
+          uniform vec3 color;
+          uniform float bloomIntensity;
+          varying vec3 vWorldNormal;
+          varying vec3 vWorldPosition;
+          varying vec3 vPosition;
+
+          // cheap 3D value noise for surface granulation
+          float hash(vec3 p) {
+            p = fract(p * 0.3183099 + 0.1);
+            p *= 17.0;
+            return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+          }
+          float noise(vec3 p) {
+            vec3 i = floor(p);
+            vec3 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(
+              mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x),
+                  mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+              mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+                  mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y),
+              f.z
+            );
+          }
+
+          void main() {
+            float grain = noise(vPosition * 2.4 + vec3(time * 0.05));
+            grain += noise(vPosition * 5.0 - vec3(time * 0.08)) * 0.5;
+            grain = grain / 1.5;
+
+            vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+            float fresnel = pow(1.0 - abs(dot(normalize(vWorldNormal), viewDir)), 1.4);
+            vec3 core = color * (1.5 + grain * 0.9) * bloomIntensity;
+            vec3 limb = mix(core, vec3(1.6, 1.45, 1.15) * bloomIntensity, fresnel * 0.55);
+            gl_FragColor = vec4(limb, 1.0);
+          }
+        `,
       });
-      const rootMesh = new THREE.Mesh(new THREE.SphereGeometry(group.radius, 32, 32), rootMaterial);
+      starMaterials.push(rootMaterial);
+      const rootMesh = new THREE.Mesh(new THREE.SphereGeometry(group.radius, 48, 48), rootMaterial);
       const childCount = group.nodes.length;
       rootMesh.userData = {
         kind: "root",
@@ -965,21 +1022,34 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       meshById.set(group.id, rootMesh);
       rootMesh.layers.enable(BLOOM_LAYER);
 
-      const sunLight = new THREE.PointLight(0xfff2d6, Math.max(900, group.radius * 700), 0, 1.7);
+      const sunLight = new THREE.PointLight(
+        0xfff2d6,
+        Math.max(900, group.radius * 700) * (group.bloomIntensity ?? 1),
+        0,
+        1.7,
+      );
       sunLight.position.set(0, 0, 0);
       groupNode.add(sunLight);
 
-      const glow = new THREE.Mesh(
-        new THREE.SphereGeometry(group.radius * 1.75, 32, 32),
-        new THREE.MeshBasicMaterial({
+      // UnrealBloomPass blurs through several halved-resolution mip levels; once the star's
+      // own on-screen size shrinks to a few pixels (zoomed out), tiny sub-pixel shifts in
+      // where it lands on each mip's downsample grid make it register inconsistently --
+      // flickering the halo on/off. A sizeAttenuation:false point keeps a constant screen-space
+      // footprint regardless of distance, giving bloom something reliably large to lock onto.
+      const bloomAnchor = new THREE.Points(
+        new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0], 3)),
+        new THREE.PointsMaterial({
           color: rootColor,
+          size: 26 * (group.bloomIntensity ?? 1),
+          sizeAttenuation: false,
           transparent: true,
-          opacity: 0.08,
+          opacity: 0.9,
           depthWrite: false,
+          blending: THREE.AdditiveBlending,
         }),
       );
-      glow.layers.enable(BLOOM_LAYER);
-      groupNode.add(glow);
+      bloomAnchor.layers.enable(BLOOM_LAYER);
+      groupNode.add(bloomAnchor);
 
       group.nodes.forEach((node) => {
         const nodeColor = new THREE.Color(node.color || "#6ee7a8");
@@ -1106,10 +1176,11 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       targetId: string;
       label?: string;
     };
+    const mutedLinkBaseOpacity = 0.1;
     const mutedLinkMaterial = new THREE.LineBasicMaterial({
       color: 0x8fb4d9,
       transparent: true,
-      opacity: 0.1,
+      opacity: mutedLinkBaseOpacity * linkOpacityScale,
       depthWrite: false,
     });
     const antsMaterial = new THREE.LineBasicMaterial({
@@ -1571,6 +1642,11 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
         orbitOpacityScale = detail.orbitOpacity / 100;
       }
 
+      if (typeof detail.linkOpacity === "number") {
+        linkOpacityScale = detail.linkOpacity / 100;
+        mutedLinkMaterial.opacity = mutedLinkBaseOpacity * linkOpacityScale;
+      }
+
       if (typeof detail.renderDistance === "number") {
         renderDistanceScale = detail.renderDistance;
       }
@@ -1912,6 +1988,9 @@ export function UniverseCanvas({ bodies, links = [], viewportClassName, focusTar
       nebulaA.rotation.z = Math.sin(time * 0.15) * 0.02;
       nebulaB.rotation.y = time * 0.004;
       nebulaB.rotation.x = Math.cos(time * 0.12) * 0.02;
+      starMaterials.forEach((material) => {
+        material.uniforms.time.value = time;
+      });
       if (prettyMode) {
         renderBloomed();
       } else {
