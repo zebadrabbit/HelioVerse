@@ -43,6 +43,10 @@ const CHAT_FADE_OUT_MS = 3000;
 const CONFIG_STORAGE_KEY = "helioverse:dashboard:config:v1";
 const LAYOUT_STORAGE_KEY = "helioverse:dashboard:layout:v1";
 export const FOCUS_EVENT = "helioverse:focus-target";
+// The comms feed and audio windows have full state machines but renderWindow is only
+// called for left/right. Until the owner decides to mount or delete them, nothing may
+// hide the mounted panels to make room for a window that doesn't exist.
+const COMMS_WINDOW_MOUNTED = false;
 
 const INERTIA_BY_PANEL: Record<DragTarget, { durationMs: number; easingPower: number }> = {
   left: { durationMs: 135, easingPower: 2.4 },
@@ -520,7 +524,7 @@ export function DashboardLayout({
       const newest = merged[merged.length - 1];
       playCue(newest.tone);
       setChatActivityAt(Date.now());
-      if (autoOpenComms) {
+      if (autoOpenComms && COMMS_WINDOW_MOUNTED) {
         setLeftVisible(false);
         setRightVisible(false);
         setAudioVisible(false);
@@ -740,7 +744,7 @@ export function DashboardLayout({
         toggleRightPanel();
       }
 
-      if (event.key === "\\") {
+      if (event.key === "\\" && COMMS_WINDOW_MOUNTED) {
         event.preventDefault();
         playCue("toggle", 0.75);
         openExclusivePanel("chat");

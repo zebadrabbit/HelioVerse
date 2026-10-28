@@ -43,7 +43,6 @@ beforeAll(() => {
     unobserve() {}
     disconnect() {}
   }
-  // @ts-expect-error jsdom does not implement ResizeObserver
   global.ResizeObserver = FakeResizeObserver;
   // jsdom logs a loud "not implemented" error for canvas 2D contexts; the texture code already
   // treats a null context as "skip the map", so make that the quiet path.
@@ -87,5 +86,15 @@ describe("DashboardLayout", () => {
         <DashboardLayout leftPanel={<div>left</div>} rightPanel={<div>right</div>} mainPanel={<div>main</div>} />,
       ),
     ).not.toThrow();
+  });
+
+  it("keeps the left/right panels visible when a notification arrives", () => {
+    // The comms window isn't mounted, so a notification must not hide the panels to make room for it.
+    const notifications = [{ id: "n1", text: "hello", tone: "info" as const, timestamp: new Date().toISOString() }];
+    const { getByText } = render(
+      <DashboardLayout leftPanel={<div>left</div>} rightPanel={<div>right</div>} mainPanel={<div>main</div>} notifications={notifications} />,
+    );
+    expect(getByText("left")).toBeTruthy();
+    expect(getByText("right")).toBeTruthy();
   });
 });
