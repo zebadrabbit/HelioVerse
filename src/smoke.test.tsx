@@ -13,8 +13,23 @@ vi.mock("three", async (importOriginal) => {
     outputColorSpace = actual.SRGBColorSpace;
     toneMapping = actual.ACESFilmicToneMapping;
     toneMappingExposure = 1;
+    // EffectComposer/UnrealBloomPass are constructed unconditionally and poke these on setup.
+    shadowMap = { enabled: false, type: actual.PCFSoftShadowMap };
+    capabilities = { isWebGL2: true, maxTextureSize: 4096 };
+    autoClear = true;
     setPixelRatio() {}
+    getPixelRatio() { return 1; }
     setSize() {}
+    getSize(target: { set(w: number, h: number): unknown }) { return target.set(1, 1); }
+    getContext() { return {}; }
+    setRenderTarget() {}
+    getRenderTarget() { return null; }
+    setClearColor() {}
+    getClearColor(target: unknown) { return target; }
+    getClearAlpha() { return 1; }
+    setClearAlpha() {}
+    clear() {}
+    clearDepth() {}
     render() {}
     dispose() {}
   }
@@ -30,6 +45,9 @@ beforeAll(() => {
   }
   // @ts-expect-error jsdom does not implement ResizeObserver
   global.ResizeObserver = FakeResizeObserver;
+  // jsdom logs a loud "not implemented" error for canvas 2D contexts; the texture code already
+  // treats a null context as "skip the map", so make that the quiet path.
+  HTMLCanvasElement.prototype.getContext = () => null;
 });
 
 afterEach(() => {
