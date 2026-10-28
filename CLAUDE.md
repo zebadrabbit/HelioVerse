@@ -7,9 +7,8 @@ controls and usage -- read it first; this file only covers what trips agents up.
 
 ## Commands
 
-- `npm run build` -- tsup, writes `dist/`. `npm test` / `npx vitest run` -- jsdom smoke suite
-  (`src/smoke.test.tsx`, fake WebGL renderer). `npx tsc --noEmit -p .` -- typecheck.
-- Run build and tests before committing; never commit red.
+- `npm run build` (tsup -> `dist/`), `npm test` (jsdom smoke suite in `src/smoke.test.tsx`, fake
+  WebGL renderer), `npx tsc --noEmit -p .` (typecheck). Run build and tests before committing.
 
 ## Contract and bridge
 
