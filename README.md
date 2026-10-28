@@ -21,6 +21,8 @@ type Body = {
   relevance: number;    // 0..1ish, drives orbit distance from center
   parentId?: string;    // moon-orbits-planet style grouping
   status?: string;       // optional; only used for a status-color accent
+  bloomIntensity?: number; // optional, star-only; 0..3ish multiplier on the
+                           // star's brightness/light/glow (default 1)
 };
 
 type Link = { id: string; sourceId: string; targetId: string; label?: string };
@@ -32,6 +34,12 @@ center). Their direct children orbit as planets; planets' children orbit as
 moons (tracking the parent each frame); anything deeper orbits the root as
 satellites. Depth in the graph — not the `type` string — drives this tiering,
 so arbitrary `type` values are always safe.
+
+Everything else about a body's look -- rocky / water / gas-giant archetype,
+whether it has rings and how many bands, axial tilt, spin, surface texture --
+is derived from a hash of its `id`. Nothing extra has to be stored, and a
+body keeps the same face across re-renders; the flip side is that renaming
+an id changes its appearance.
 
 `Link`s render as relationship "shipping lanes": a faint always-on line
 between the two bodies, plus a brighter animated "marching ants" dash overlay
@@ -58,6 +66,8 @@ with the view angle).
   ↑/↓ or hover to browse, release Tab / Enter / click to fly the camera there
 - Icon rail (left edge): toggle Mission Control / Atlas independently, or
   open Settings
+- `[` / `]`: toggle the Mission Control / Atlas windows (ignored while typing
+  in a field)
 
 ## Usage
 
@@ -80,10 +90,13 @@ small window event bridge (`helioverse:focus-target`, `helioverse:canvas-reset`,
 clicked in a host panel, or a pick made in the overview, can move the camera
 without remounting the canvas.
 
-`DashboardLayout`'s Settings panel (orbit trail opacity, background color,
-render distance, audio, pretty mode) talks to `UniverseCanvas` the same way,
+`DashboardLayout`'s Settings panel talks to `UniverseCanvas` the same way,
 over `SETTINGS_EVENT`/`SETTINGS_STORAGE_KEY` (exported, along with the
-`CanvasSettings` type and `DEFAULT_CANVAS_SETTINGS`).
+`CanvasSettings` type and `DEFAULT_CANVAS_SETTINGS`). `CanvasSettings` is
+`orbitOpacity` and `linkOpacity` (0-100 percent), `backgroundColor` (hex),
+`renderDistance` and `clustering` (0.5-2.5 multipliers on LOD cutoffs and
+orbit radii respectively), and `prettyMode` (selective bloom on stars). The
+panel also carries the UI audio controls (mute, master/UI volume).
 
 A body's "Open" action fires `OPEN_EVENT` with `{ bodyId, tier }` in its
 detail — this package doesn't know what "open" means for any given domain,
