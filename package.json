@@ -28,18 +28,18 @@
   "peerDependencies": {
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "three": "^0.184.0"
+    "three": "^0.184.0 || ^0.185.0"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/three": "^0.184.1",
+    "@types/three": "^0.185.1",
     "jsdom": "^25.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "three": "^0.184.0",
+    "three": "^0.185.1",
     "tsup": "^8.3.5",
     "typescript": "^5",
     "vitest": "^4.1.8"

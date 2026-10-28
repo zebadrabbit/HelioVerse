@@ -98,5 +98,5 @@ npm run build   # tsup -> dist/ (esm + cjs + d.ts)
 npm test        # vitest smoke tests
 ```
 
-Peer dependencies: `react`/`react-dom` ^19.2.4, `three` ^0.184.0 — install the same
+Peer dependencies: `react`/`react-dom` ^19.2.4, `three` ^0.184 or ^0.185 — install the same
 versions in the consuming app.
