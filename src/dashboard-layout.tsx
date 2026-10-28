@@ -34,8 +34,6 @@ type Position = {
 
 type DragTarget = "left" | "right" | "chat" | "audio";
 
-type ConfigTab = "audio" | "comms" | "interaction" | "display";
-
 type SoundCue = "toggle" | "close" | "dragStart" | "drop" | "focus" | "info" | "success" | "error";
 
 const CHAT_FADE_MS = 15000;
@@ -66,8 +64,6 @@ const DEFAULT_CONFIG = {
   autoOpenComms: true,
   inertiaScale: 1,
   snapRadius: 28,
-  showHotkeyHints: true,
-  backgroundAtmosphere: 100,
 };
 
 function getStoredConfig(): Partial<typeof DEFAULT_CONFIG> {
@@ -173,8 +169,6 @@ export function DashboardLayout({
   const [autoOpenComms, setAutoOpenComms] = useState(DEFAULT_CONFIG.autoOpenComms);
   const [inertiaScale, setInertiaScale] = useState(DEFAULT_CONFIG.inertiaScale);
   const [snapRadius, setSnapRadius] = useState(DEFAULT_CONFIG.snapRadius);
-  const [showHotkeyHints, setShowHotkeyHints] = useState(false);
-  const [backgroundAtmosphere, setBackgroundAtmosphere] = useState(DEFAULT_CONFIG.backgroundAtmosphere);
 
   // ponytail: storedConfig/storedLayout come from localStorage, which isn't
   // available during SSR -- applying them in useState initializers made the
@@ -202,7 +196,6 @@ export function DashboardLayout({
     if (typeof storedConfig.autoOpenComms === "boolean") setAutoOpenComms(storedConfig.autoOpenComms);
     if (typeof storedConfig.inertiaScale === "number") setInertiaScale(clamp(storedConfig.inertiaScale, 0.5, 1.8));
     if (typeof storedConfig.snapRadius === "number") setSnapRadius(clamp(storedConfig.snapRadius, 12, 64));
-    if (typeof storedConfig.backgroundAtmosphere === "number") setBackgroundAtmosphere(clamp(storedConfig.backgroundAtmosphere, 40, 150));
 
     try {
       const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -229,7 +222,6 @@ export function DashboardLayout({
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
     window.dispatchEvent(new CustomEvent<Partial<CanvasSettings>>(SETTINGS_EVENT, { detail: patch }));
   }, []);
-  const [configTab, setConfigTab] = useState<ConfigTab>("audio");
 
   const [chatHovered, setChatHovered] = useState(false);
   const [chatActivityAt, setChatActivityAt] = useState(() => Date.now());
@@ -267,21 +259,17 @@ export function DashboardLayout({
       autoOpenComms,
       inertiaScale,
       snapRadius,
-      showHotkeyHints,
-      backgroundAtmosphere,
     };
 
     window.localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(payload));
   }, [
     autoOpenComms,
-    backgroundAtmosphere,
     chatFadeMs,
     cueIntensity,
     inertiaScale,
     masterVolume,
     maxChatMessages,
     muted,
-    showHotkeyHints,
     snapRadius,
     typewriterIntervalMs,
     uiVolume,
@@ -727,11 +715,8 @@ export function DashboardLayout({
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTypingTarget = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
-
-      if ((event.key === "h" || event.key === "H") && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingTarget) {
-        event.preventDefault();
-        setShowHotkeyHints((value) => !value);
-        playCue("toggle", 0.7);
+      if (isTypingTarget) {
+        return;
       }
 
       if (event.key === "[") {
@@ -823,10 +808,9 @@ export function DashboardLayout({
   const chatOpacity = chatHovered ? 1 : elapsed <= chatVisibleHold ? 1 : clamp(1 - (elapsed - chatVisibleHold) / CHAT_FADE_OUT_MS, 0, 1);
   const chatDormant = !chatHovered && elapsed >= chatFadeMs;
 
-  // configTab/backgroundAtmosphere/chatOpacity/chatDormant are retained from the
-  // original component for behavioral parity (audio config + comms feed rendering
-  // aren't wired up in this generic package yet -- HelioVerse consumers don't pass
-  // audio/chat content, only leftPanel/rightPanel/mainPanel).
+  // chatOpacity/chatDormant (and the chat/audio window state above) are the comms feed
+  // machinery carried over from Heliospheric; nothing renders it until the owner decides
+  // to mount or delete it (see COMMS_WINDOW_MOUNTED).
 
   const renderWindow = (
     target: DragTarget,
