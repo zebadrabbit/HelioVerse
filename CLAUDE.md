@@ -19,8 +19,8 @@ controls and usage -- read it first; this file only covers what trips agents up.
 - Components talk over `window` CustomEvents with `helioverse:` names (`FOCUS_EVENT`,
   `SETTINGS_EVENT`, `OPEN_EVENT`, canvas-reset, radial-action, breadcrumb). Never
   `dispatchEvent` inside a React state updater (see the note in `updateCanvasSetting`).
-- `src/index.ts` is the public surface; `NotificationEvent` is exported and imported by the
-  consumer even though the comms window isn't mounted (`COMMS_WINDOW_MOUNTED`).
+- `src/index.ts` is the public surface; `NotificationEvent`s passed as `notifications` land in
+  the Comms window (`\` hotkey / rail button), which fades out and closes after `chatFadeMs`.
 
 ## Consumer
 

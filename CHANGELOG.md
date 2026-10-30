@@ -8,6 +8,10 @@ The format follows Keep a Changelog principles and Semantic Versioning.
 
 ### Added
 
+- Comms window mounted: `notifications` render as a typewriter feed in a
+  draggable "Comms" window (rail button, `\` hotkey, auto-opens beside the
+  other panels on a new notification when `autoOpenComms` is on, fades and
+  closes after `chatFadeMs`)
 - Package extracted and generalized from Heliospheric's universe-canvas.tsx
   and dashboard-layout.tsx: `UniverseCanvas`, `DashboardLayout`
 - Domain-agnostic `Body`/`Link` data contract; unknown `type` strings render

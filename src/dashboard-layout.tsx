@@ -9,7 +9,7 @@
  *         for this package so multiple consumers can coexist on the same page.
  */
 
-import { Compass, GripVertical, Rocket, Settings, Sparkles, Volume2, VolumeX } from "lucide-react";
+import { Compass, GripVertical, MessageSquare, Rocket, Settings, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { DEFAULT_CANVAS_SETTINGS, SETTINGS_EVENT, SETTINGS_STORAGE_KEY, type CanvasSettings } from "./universe-canvas";
 
@@ -41,10 +41,12 @@ const CHAT_FADE_OUT_MS = 3000;
 const CONFIG_STORAGE_KEY = "helioverse:dashboard:config:v1";
 const LAYOUT_STORAGE_KEY = "helioverse:dashboard:layout:v1";
 export const FOCUS_EVENT = "helioverse:focus-target";
-// The comms feed and audio windows have full state machines but renderWindow is only
-// called for left/right. Until the owner decides to mount or delete them, nothing may
-// hide the mounted panels to make room for a window that doesn't exist.
-const COMMS_WINDOW_MOUNTED = false;
+// The audio window has a full state machine but is never rendered; the comms window is.
+const TONE_CLASS: Record<NotificationEvent["tone"], string> = {
+  info: "text-sky-200",
+  success: "text-emerald-300",
+  error: "text-rose-300",
+};
 
 const INERTIA_BY_PANEL: Record<DragTarget, { durationMs: number; easingPower: number }> = {
   left: { durationMs: 135, easingPower: 2.4 },
@@ -512,10 +514,7 @@ export function DashboardLayout({
       const newest = merged[merged.length - 1];
       playCue(newest.tone);
       setChatActivityAt(Date.now());
-      if (autoOpenComms && COMMS_WINDOW_MOUNTED) {
-        setLeftVisible(false);
-        setRightVisible(false);
-        setAudioVisible(false);
+      if (autoOpenComms) {
         setChatVisible(true);
         setChatMinimized(false);
       }
@@ -674,34 +673,16 @@ export function DashboardLayout({
     playCue("dragStart", 0.8);
   };
 
-  function openExclusivePanel(target: DragTarget) {
-    setLeftVisible(target === "left" ? (value) => !value : false);
-    setRightVisible(target === "right" ? (value) => !value : false);
-    setChatVisible(target === "chat" ? (value) => !value : false);
-    setAudioVisible(target === "audio" ? (value) => !value : false);
-
-    if (target === "left") {
-      setLeftMinimized(false);
-      return;
-    }
-
-    if (target === "right") {
-      setRightMinimized(false);
-      return;
-    }
-
-    if (target === "chat") {
-      setChatMinimized(false);
-      setChatActivityAt(Date.now());
-      return;
-    }
-
-    setAudioMinimized(false);
-  }
-
   const toggleLeftPanel = useCallback(() => {
     setLeftVisible((value) => !value);
     setLeftMinimized(false);
+    playCue("toggle", 0.7);
+  }, [playCue]);
+
+  const toggleChatPanel = useCallback(() => {
+    setChatVisible((value) => !value);
+    setChatMinimized(false);
+    setChatActivityAt(Date.now());
     playCue("toggle", 0.7);
   }, [playCue]);
 
@@ -729,16 +710,15 @@ export function DashboardLayout({
         toggleRightPanel();
       }
 
-      if (event.key === "\\" && COMMS_WINDOW_MOUNTED) {
+      if (event.key === "\\") {
         event.preventDefault();
-        playCue("toggle", 0.75);
-        openExclusivePanel("chat");
+        toggleChatPanel();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [playCue, toggleLeftPanel, toggleRightPanel]);
+  }, [playCue, toggleChatPanel, toggleLeftPanel, toggleRightPanel]);
 
   useEffect(() => {
     const onDocumentClick = (event: MouseEvent) => {
@@ -808,9 +788,25 @@ export function DashboardLayout({
   const chatOpacity = chatHovered ? 1 : elapsed <= chatVisibleHold ? 1 : clamp(1 - (elapsed - chatVisibleHold) / CHAT_FADE_OUT_MS, 0, 1);
   const chatDormant = !chatHovered && elapsed >= chatFadeMs;
 
-  // chatOpacity/chatDormant (and the chat/audio window state above) are the comms feed
-  // machinery carried over from Heliospheric; nothing renders it until the owner decides
-  // to mount or delete it (see COMMS_WINDOW_MOUNTED).
+  // ponytail: a faded-out window closes outright, so the rail/hotkey state matches what's on screen.
+  useEffect(() => {
+    if (chatDormant) setChatVisible(false);
+  }, [chatDormant]);
+
+  const commsFeed = (
+    <div ref={chatFeedRef} className="flex max-h-64 flex-col gap-1.5 overflow-y-auto font-mono text-xs">
+      {chatMessages.map((message, index) => (
+        <div key={message.id} className="flex gap-2">
+          <span className="shrink-0 text-slate-500">
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+          <span className={TONE_CLASS[message.tone]}>
+            {index === chatMessages.length - 1 ? message.text.slice(0, typedCount) : message.text}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 
   const renderWindow = (
     target: DragTarget,
@@ -860,6 +856,11 @@ export function DashboardLayout({
         {mainPanel}
         {leftVisible && renderWindow("left", "Mission Control", leftPos, 384, leftMinimized, setLeftMinimized, leftPanel)}
         {rightVisible && renderWindow("right", "Atlas", rightPos, 416, rightMinimized, setRightMinimized, rightPanel)}
+        {chatVisible && (
+          <div style={{ opacity: chatOpacity }} onPointerEnter={() => setChatHovered(true)} onPointerLeave={() => setChatHovered(false)}>
+            {renderWindow("chat", "Comms", chatPos, 480, chatMinimized, setChatMinimized, commsFeed)}
+          </div>
+        )}
         <div className="absolute left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-2 rounded-2xl border border-slate-800/80 bg-slate-950/70 p-2 shadow-xl backdrop-blur-md">
           <button
             type="button"
@@ -878,6 +879,15 @@ export function DashboardLayout({
             title="Atlas [ ] key ]"
           >
             <Compass className="h-5 w-5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={toggleChatPanel}
+            className={railButtonClass(chatVisible)}
+            aria-label="Toggle Comms"
+            title="Comms [ \\ key ]"
+          >
+            <MessageSquare className="h-5 w-5" aria-hidden />
           </button>
           <div className="my-1 h-px bg-slate-800" />
           <button

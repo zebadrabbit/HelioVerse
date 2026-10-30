@@ -88,12 +88,12 @@ describe("DashboardLayout", () => {
     ).not.toThrow();
   });
 
-  it("keeps the left/right panels visible when a notification arrives", () => {
-    // The comms window isn't mounted, so a notification must not hide the panels to make room for it.
+  it("opens the Comms window beside the panels when a notification arrives", () => {
     const notifications = [{ id: "n1", text: "hello", tone: "info" as const, timestamp: new Date().toISOString() }];
     const { getByText } = render(
       <DashboardLayout leftPanel={<div>left</div>} rightPanel={<div>right</div>} mainPanel={<div>main</div>} notifications={notifications} />,
     );
+    expect(getByText("Comms")).toBeTruthy();
     expect(getByText("left")).toBeTruthy();
     expect(getByText("right")).toBeTruthy();
   });
